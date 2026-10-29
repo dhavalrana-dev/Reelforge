@@ -7,6 +7,7 @@ import {
   OUTPUT_FORMATS,
   TranscriptSchema,
   captionPagesForTimeline,
+  intersectRanges,
   keepRangesFromSilences,
   normalizeRanges,
   resolveTimeline,
@@ -31,7 +32,7 @@ import {
   type CaptionStyleName,
 } from "@reelforge/media";
 import { COMPONENTS, THEMES } from "@reelforge/motion";
-import { renderProject, renderStill } from "@reelforge/renderer";
+import { planRecording, renderProject, renderStill } from "@reelforge/renderer";
 
 const program = new Command();
 program.name("reelforge").description("REELFORGE AI: video editing and programmatic video for AI coding agents").version("0.1.0");
@@ -170,7 +171,7 @@ program
         preFilter: audioCleanup ? cleanupChain({ ...audioCleanup, compress: false }) : [],
       });
       const speech = keepRangesFromSilences(silences, end, { padding: Number(opts.padding), minSilence: Number(opts.minSilence) });
-      keep = intersect(keep, speech);
+      keep = intersectRanges(keep, speech);
     }
 
     const timeline = resolveTimeline(keep, fps);
@@ -220,6 +221,49 @@ program
     for (const c of report.checks) console.log(`  [${c.ok ? "OK  " : "FAIL"}] ${c.name}: ${c.detail}`);
     console.log(`wrote ${opts.output} and ${edlPath}`);
     if (!report.ok) process.exitCode = 1;
+  });
+
+program
+  .command("plan <input>")
+  .description("analyse a recording and write an editable project file (no rendering)")
+  .requiredOption("-o, --output <project.json>", "project file to write")
+  .option("--format <ratio>", "9:16 | 16:9 | 1:1", "9:16")
+  .option("--fps <fps>", "output frame rate", "30")
+  .option("--theme <name>", Object.keys(THEMES).join(" | "), "dark-tech")
+  .option("--keep <ranges>", 'source ranges to keep, e.g. "0-12.5,14-30"')
+  .option("--remove-silence", "cut silent sections")
+  .option("--noise <db>", "silence threshold", "-35dB")
+  .option("--min-silence <seconds>", "shortest silence to cut", "0.4")
+  .option("--padding <seconds>", "audio kept around each cut", "0.1")
+  .option("--captions", "transcribe and add captions")
+  .option("--caption-style <name>", Object.keys(CAPTION_STYLES).join(" | "), "clean-pro")
+  .option("--model <name>", "whisper model", "base")
+  .option("--language <code>", "transcription language, e.g. en")
+  .option("--enhance-audio", "add audio clean-up settings")
+  .option("--loudness <lufs>", "loudness target", "-14")
+  .option("--denoise <level>", "off | light | strong", "light")
+  .option("--title <text>", "intro headline over the opening seconds")
+  .option("--lower-third <name|role>", 'name strap, e.g. "Ada Lovelace|Systems engineer"')
+  .action(async (input, opts) => {
+    if (resolve(opts.output).toLowerCase() === resolve(input).toLowerCase()) throw new Error("output path must differ from the input");
+    if (!["off", "light", "strong"].includes(opts.denoise)) throw new Error("--denoise must be off, light or strong");
+    const [ltTitle, ltSubtitle] = opts.lowerThird ? String(opts.lowerThird).split("|").map((s: string) => s.trim()) : [];
+    const result = await planRecording(input, opts.output, {
+      format: parseFormat(opts.format),
+      fps: Number(opts.fps),
+      theme: opts.theme,
+      keep: opts.keep ? parseRanges(opts.keep) : undefined,
+      removeSilence: !!opts.removeSilence,
+      silence: { noise: opts.noise, minDuration: Number(opts.minSilence), padding: Number(opts.padding) },
+      captions: opts.captions ? { style: parseCaptionStyle(opts.captionStyle), model: opts.model, language: opts.language } : undefined,
+      audio: opts.enhanceAudio ? { loudness: Number(opts.loudness), denoise: opts.denoise } : undefined,
+      title: opts.title,
+      lowerThird: ltTitle ? { title: ltTitle, ...(ltSubtitle ? { subtitle: ltSubtitle } : {}) } : undefined,
+      onProgress: (l) => console.log(l),
+    });
+    console.log(`${result.sourceDuration.toFixed(2)}s -> ${result.outputDuration.toFixed(2)}s${result.words ? `, ${result.words} words transcribed` : ""}`);
+    console.log(`wrote ${result.projectFile}${result.transcriptFile ? ` and ${result.transcriptFile}` : ""}`);
+    console.log(`next: review or edit it, preview with "reelforge still ${opts.output} --frame 30 -o check.png", then "reelforge render ${opts.output} -o out.mp4"`);
   });
 
 program
@@ -301,18 +345,6 @@ program
     if (!issues.length) console.log("project is valid");
     if (issues.some((i) => i.level === "error")) process.exitCode = 1;
   });
-
-function intersect(a: TimeRange[], b: TimeRange[]): TimeRange[] {
-  const out: TimeRange[] = [];
-  for (const x of a) {
-    for (const y of b) {
-      const start = Math.max(x.start, y.start);
-      const end = Math.min(x.end, y.end);
-      if (end > start) out.push({ start, end });
-    }
-  }
-  return normalizeRanges(out);
-}
 
 program.parseAsync().catch((err: Error) => {
   console.error(`error: ${err.message}`);

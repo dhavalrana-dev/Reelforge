@@ -54,6 +54,19 @@ export function invertRanges(ranges: TimeRange[], duration: number): TimeRange[]
   return out;
 }
 
+/** Parts covered by both `a` and `b`. */
+export function intersectRanges(a: TimeRange[], b: TimeRange[]): TimeRange[] {
+  const out: TimeRange[] = [];
+  for (const x of a) {
+    for (const y of b) {
+      const start = Math.max(x.start, y.start);
+      const end = Math.min(x.end, y.end);
+      if (end > start) out.push({ start, end });
+    }
+  }
+  return normalizeRanges(out);
+}
+
 export interface SilenceCutOptions {
   /** Speech kept on each side of a removed silence, so words aren't clipped. */
   padding?: number;

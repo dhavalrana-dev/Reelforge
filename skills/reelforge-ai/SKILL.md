@@ -22,7 +22,7 @@ This skill is a thin layer over the `reelforge` CLI. Do the work with the CLI. D
 
 For graphics over footage, or a video built only from graphics:
 
-1. Write a project JSON file. Run `reelforge components` to see the components, themes and caption styles. Scene frames are output frames (after cuts).
+1. For footage, start with `reelforge plan <file> -o <project.json> [--remove-silence] [--captions] [--enhance-audio] [--title "..."] [--lower-third "Name|Role"]`. It writes the project with cuts, transcript and audio settings. To place a scene when something is said, look up the word in `<project>.transcript.json`. Its times are in the source recording; convert them to output frames through the keep ranges. Without footage, write the project JSON yourself. Run `reelforge components` to see the components, themes and caption styles. Scene frames are output frames (after cuts).
 2. Check the look with `reelforge still <project.json> --frame N -o check.png` and view the PNG before rendering the full video.
 3. Run `reelforge render <project.json> -o <out.mp4>` and report its validation checks.
 

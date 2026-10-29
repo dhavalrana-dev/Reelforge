@@ -25,6 +25,12 @@ export function seeded(seed: number): number {
 
 export const clamp01 = (n: number) => Math.min(1, Math.max(0, n));
 
+/**
+ * In portrait frames, burned-in captions occupy the band from here down to
+ * about 0.76 of the height. Components keep their content above it.
+ */
+export const CAPTION_ZONE_TOP = 0.68;
+
 /** Vertical anchor for a named slot, as a fraction of frame height (safe-area aware). */
 export function slotY(position: "top" | "center" | "bottom", portrait: boolean): number {
   if (position === "top") return portrait ? 0.16 : 0.14;

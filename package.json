@@ -10,7 +10,8 @@
   "scripts": {
     "test": "vitest run",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "reelforge": "tsx apps/cli/src/index.ts"
+    "reelforge": "tsx apps/cli/src/index.ts",
+    "demo": "tsx examples/talking-head-demo/run.ts"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",

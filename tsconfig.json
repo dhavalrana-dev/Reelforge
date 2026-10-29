@@ -13,5 +13,5 @@
     "isolatedModules": true,
     "jsx": "react-jsx"
   },
-  "include": ["packages/*/src", "packages/*/test", "apps/*/src"]
+  "include": ["packages/*/src", "packages/*/test", "apps/*/src", "examples"]
 }

@@ -50,6 +50,33 @@ npm run reelforge -- edit recording.mp4 -o reel.mp4 --remove-silence --captions 
 With `--captions` it also keeps the source-time `.transcript.json` and the `.captions.ass` file. Pass
 `--transcript` to re-cut or restyle without transcribing again. The checks cover resolution, frame rate, duration, A/V length, and a full decode.
 
+## Plan, review, render
+
+`edit` is the one-step path. For anything with graphics, `plan` writes a reviewable project file
+first (the edit plan from blueprint §7, stage B). An agent or a person can adjust it, preview single
+frames, then render:
+
+```bash
+npm run reelforge -- plan recording.mp4 -o reel.json --remove-silence --captions --enhance-audio \
+  --title "How a website loads" --lower-third "Ada Lovelace|Systems engineer"
+npm run reelforge -- still reel.json --frame 30 -o check.png
+npm run reelforge -- render reel.json -o reel.mp4
+```
+
+The project holds frame-snapped keep ranges, a link to the saved transcript, audio settings and
+starter scenes. Paths in it are relative to the project file.
+
+### Repeatable demo
+
+```bash
+npm run demo                        # synthesises a talking-head recording (Windows TTS + room noise)
+npm run demo -- path/to/video.mp4   # or uses yours
+```
+
+The demo plans the recording, adds a diagram timed to the moment the speaker says "browser",
+renders preview stills, then renders and validates the Reel. Output goes to `out/demo/`. On this
+machine, a 26.6 s recording becomes a 13.6 s Reel in about 45 s end to end.
+
 ## Audio clean-up
 
 ```bash
@@ -139,6 +166,8 @@ painted once and reused.
   capture pipeline. Full-frame animated backgrounds are the slowest case, since gradient dithering
   compresses badly.
 - `still` doesn't draw captions yet.
+- In portrait frames, components keep their content above `CAPTION_ZONE_TOP` (68% of the height),
+  so burned-in captions never cover them.
 - Packages export TypeScript sources directly (run via `tsx`/Vitest). A compiled build step
   is needed before packaging the installer.
 - The blueprint specified pnpm. npm workspaces are used for now because pnpm isn't installed.

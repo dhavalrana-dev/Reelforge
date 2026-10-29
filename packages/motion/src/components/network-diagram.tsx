@@ -1,6 +1,6 @@
 import { easing, mapRange, spring } from "@reelforge/core";
 import { z } from "zod";
-import { clamp01, type FrameContext } from "../context";
+import { CAPTION_ZONE_TOP, clamp01, type FrameContext } from "../context";
 
 export const NetworkDiagramProps = z.object({
   nodes: z.array(z.string().min(1)).min(2).max(6),
@@ -27,8 +27,9 @@ export function NetworkDiagram({ ctx, ...raw }: z.input<typeof NetworkDiagramPro
   const boxH = vertical ? 11 * u : 14 * u;
   const centers = p.nodes.map((_, i) => {
     const t = n === 1 ? 0.5 : i / (n - 1);
+    // Portrait layouts stay above CAPTION_ZONE_TOP so burned-in captions never cover a node.
     return vertical
-      ? { x: width / 2, y: height * (0.24 + 0.52 * t) }
+      ? { x: width / 2, y: height * (0.18 + (CAPTION_ZONE_TOP - 0.06 - 0.18) * t) }
       : { x: width * (0.1 + 0.8 * t), y: height / 2 };
   });
 
