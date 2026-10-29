@@ -14,6 +14,7 @@ This skill is a thin layer over the `reelforge` CLI. Do the work with the CLI. D
 3. Optionally run `reelforge silence <file>` to preview what would be cut, and confirm with the user if more than about 30% of the duration would be removed.
 4. Run `reelforge edit <file> -o <out.mp4> [--remove-silence] [--keep "a-b,c-d"] [--format 9:16|16:9|1:1] [--fps 30]`.
    - For subtitles, add `--captions [--caption-style clean-pro|bold-creator] [--language en]`.
+   - For better sound, add `--enhance-audio`, which denoises, levels and normalises to -14 LUFS. Use `--denoise strong` for noisy rooms, and `--loudness -16` for podcasts or YouTube long-form.
    - To restyle or re-cut a video that already has captions, pass `--transcript <out>.transcript.json` so it isn't transcribed again.
 5. Report the validation checks printed by `edit`, and point the user to the `.edl.json` file for reviewing the cuts.
 

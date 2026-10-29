@@ -4,6 +4,7 @@ import {
   TranscriptSchema,
   captionPagesForTimeline,
   groupWords,
+  normalizeRanges,
   outputFrameToSourceTime,
   resolveTimeline,
   validateProject,
@@ -15,6 +16,7 @@ import {
   buildAssCaptions,
   defaultTools,
   probe,
+  usableDuration,
   renderCuts,
   renderGraphics,
   runWithInput,
@@ -59,7 +61,7 @@ async function plan({ project, path, warnings }: LoadedProject): Promise<Plan> {
   const source = project.sources.find((s) => s.id === project.edit!.sourceId)!;
   const info = await probe(path(source.path));
   if (!info.video) throw new Error(`source "${source.id}" has no video stream`);
-  const timeline = resolveTimeline(project.edit.keep, project.project.fps);
+  const timeline = resolveTimeline(normalizeRanges(project.edit.keep, usableDuration(info)), project.project.fps);
   if (sceneEnd > timeline.durationFrames) {
     warnings.push(`scenes run to frame ${sceneEnd} but the edited footage ends at ${timeline.durationFrames}; graphics past the end are dropped`);
   }
@@ -115,7 +117,17 @@ export async function renderProject(projectFile: string, output: string, opts: R
       }
     }
     if (p.footage) {
-      await renderCuts({ input: p.footage.path, output, timeline: p.footage.timeline, width, height, hasAudio: p.footage.hasAudio, captionsFile, overlayFrames: frames() });
+      await renderCuts({
+        input: p.footage.path,
+        output,
+        timeline: p.footage.timeline,
+        width,
+        height,
+        hasAudio: p.footage.hasAudio,
+        captionsFile,
+        overlayFrames: frames(),
+        audioCleanup: project.audio,
+      });
     } else {
       const background = project.background ?? getTheme(project.theme).background;
       await renderGraphics({ output, width, height, fps, durationFrames: p.durationFrames, background, overlayFrames: frames(), captionsFile });
@@ -130,6 +142,7 @@ export async function renderProject(projectFile: string, output: string, opts: R
     fps,
     duration: p.durationFrames / fps,
     requireAudio: p.footage ? p.footage.hasAudio : true,
+    ...(p.footage?.hasAudio && project.audio ? { loudness: project.audio.loudness, truePeak: project.audio.truePeak } : {}),
   });
   return { durationFrames: p.durationFrames, stats: renderer.stats, seconds: (Date.now() - started) / 1000, warnings: loaded.warnings, report };
 }

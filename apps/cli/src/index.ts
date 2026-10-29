@@ -17,9 +17,13 @@ import {
 } from "@reelforge/core";
 import {
   CAPTION_STYLES,
+  DEFAULT_AUDIO_CLEANUP,
+  cleanupChain,
+  type AudioCleanupOptions,
   buildAssCaptions,
   detectSilences,
   probe,
+  usableDuration,
   renderCuts,
   runDoctor,
   transcribe,
@@ -140,20 +144,32 @@ program
   .option("--transcript <json>", "reuse a transcript instead of transcribing")
   .option("--model <name>", "whisper model for --captions", "base")
   .option("--language <code>", "transcription language, e.g. en")
+  .option("--enhance-audio", "denoise, level and loudness-normalise the dialogue")
+  .option("--loudness <lufs>", "integrated loudness target for --enhance-audio", "-14")
+  .option("--denoise <level>", "off | light | strong", "light")
   .action(async (input, opts) => {
     const format = parseFormat(opts.format);
     const captionStyle = parseCaptionStyle(opts.captionStyle);
+    if (!["off", "light", "strong"].includes(opts.denoise)) throw new Error("--denoise must be off, light or strong");
+    const audioCleanup: AudioCleanupOptions | undefined = opts.enhanceAudio
+      ? { ...DEFAULT_AUDIO_CLEANUP, loudness: Number(opts.loudness), denoise: opts.denoise }
+      : undefined;
     const fps = Number(opts.fps);
     const info = await probe(input);
     if (!info.video) throw new Error("input has no video stream");
     for (const w of info.warnings) console.log(`warning: ${w}`);
 
-    let keep: TimeRange[] = opts.keep ? normalizeRanges(parseRanges(opts.keep), info.duration) : [{ start: 0, end: info.duration }];
+    const end = usableDuration(info);
+    let keep: TimeRange[] = opts.keep ? normalizeRanges(parseRanges(opts.keep), end) : [{ start: 0, end }];
     let silences: TimeRange[] = [];
     if (opts.removeSilence) {
       if (!info.audio) throw new Error("--remove-silence needs an audio stream");
-      silences = await detectSilences(input, info.duration, { noise: opts.noise, minDuration: Number(opts.minSilence) });
-      const speech = keepRangesFromSilences(silences, info.duration, { padding: Number(opts.padding), minSilence: Number(opts.minSilence) });
+      silences = await detectSilences(input, end, {
+        noise: opts.noise,
+        minDuration: Number(opts.minSilence),
+        preFilter: audioCleanup ? cleanupChain({ ...audioCleanup, compress: false }) : [],
+      });
+      const speech = keepRangesFromSilences(silences, end, { padding: Number(opts.padding), minSilence: Number(opts.minSilence) });
       keep = intersect(keep, speech);
     }
 
@@ -175,7 +191,7 @@ program
     }
 
     console.log(`rendering ${timeline.segments.length} segment(s), ${(timeline.durationFrames / fps).toFixed(2)}s of ${info.duration.toFixed(2)}s -> ${width}x${height} @ ${fps}`);
-    await renderCuts({ input, output: opts.output, timeline, width, height, hasAudio: !!info.audio, captionsFile });
+    await renderCuts({ input, output: opts.output, timeline, width, height, hasAudio: !!info.audio, captionsFile, audioCleanup });
 
     // Edit decision list next to the output, so cuts can be reviewed or reversed.
     const edlPath = sidecar(opts.output, ".edl.json");
@@ -188,11 +204,19 @@ program
       sourceDuration: info.duration,
       silences,
       timeline,
+      audio: audioCleanup ?? null,
       captions: captionsFile ? { style: captionStyle, pages: captionPages } : null,
     };
     await writeFile(edlPath, JSON.stringify(edl, null, 2));
 
-    const report = await validateOutput(opts.output, { width, height, fps, duration: timeline.durationFrames / fps, requireAudio: !!info.audio });
+    const report = await validateOutput(opts.output, {
+      width,
+      height,
+      fps,
+      duration: timeline.durationFrames / fps,
+      requireAudio: !!info.audio,
+      ...(audioCleanup && info.audio ? { loudness: audioCleanup.loudness, truePeak: audioCleanup.truePeak } : {}),
+    });
     for (const c of report.checks) console.log(`  [${c.ok ? "OK  " : "FAIL"}] ${c.name}: ${c.detail}`);
     console.log(`wrote ${opts.output} and ${edlPath}`);
     if (!report.ok) process.exitCode = 1;

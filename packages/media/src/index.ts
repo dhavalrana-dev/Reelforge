@@ -6,3 +6,4 @@ export * from "./validate";
 export * from "./doctor";
 export * from "./transcribe";
 export * from "./captions-ass";
+export * from "./audio";

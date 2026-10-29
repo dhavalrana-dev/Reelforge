@@ -46,6 +46,17 @@ export const ProjectSchema = z.object({
   background: z.string().regex(/^#[0-9a-fA-F]{6}$/, "expected #RRGGBB").optional(),
   sources: z.array(SourceSchema).default([]),
   edit: EditSchema.optional(),
+  /** Dialogue clean-up and loudness normalisation for footage audio. Omit to leave audio untouched. */
+  audio: z
+    .object({
+      loudness: z.number().min(-40).max(-5).default(-14),
+      truePeak: z.number().min(-9).max(0).default(-1),
+      denoise: z.enum(["off", "light", "strong"]).default("light"),
+      highpass: z.number().min(0).max(300).default(80),
+      compress: z.boolean().default(true),
+      expand: z.boolean().default(true),
+    })
+    .optional(),
   captions: z
     .object({
       /** Transcript JSON (source time), relative to the project file. */

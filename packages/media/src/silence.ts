@@ -6,6 +6,8 @@ export interface SilenceOptions {
   noise?: string;
   /** Minimum silence length in seconds. */
   minDuration?: number;
+  /** Filters applied before detection, e.g. denoising so hiss isn't mistaken for speech. */
+  preFilter?: string[];
 }
 
 /** Parses ffmpeg `silencedetect` log output. A silence still open at EOF ends at `duration`. */
@@ -31,14 +33,14 @@ export function parseSilenceLog(log: string, duration: number): TimeRange[] {
 export async function detectSilences(
   path: string,
   duration: number,
-  { noise = "-35dB", minDuration = 0.4 }: SilenceOptions = {},
+  { noise = "-35dB", minDuration = 0.4, preFilter = [] }: SilenceOptions = {},
   tools: Tools = defaultTools,
 ): Promise<TimeRange[]> {
   const { stderr } = await runOrThrow(tools.ffmpeg, [
     "-hide_banner", "-nostats",
     "-i", path,
     "-vn",
-    "-af", `silencedetect=noise=${noise}:d=${minDuration}`,
+    "-af", [...preFilter, `silencedetect=noise=${noise}:d=${minDuration}`].join(","),
     "-f", "null", "-",
   ]);
   return parseSilenceLog(stderr, duration);

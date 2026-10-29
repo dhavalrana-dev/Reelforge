@@ -20,6 +20,7 @@ the recorded-video workflow.
 | `@reelforge/motion` components: `kinetic-text`, `lower-third`, `network-diagram`, `counter`, `rect`, `backdrop`; themes `dark-tech`, `clean-pro` | Done |
 | `@reelforge/renderer` Chromium frame renderer, streamed into FFmpeg over footage or a background | Done |
 | CLI: `render`, `still`, `components` | Done |
+| Audio clean-up: high-pass, denoise, noise-floor-driven expander, compression, loudness target with peak limiting; loudness and clipping checks | Done |
 | Audio enhancement (loudness normalisation, denoise) | Not started |
 
 ## Usage
@@ -48,6 +49,38 @@ npm run reelforge -- edit recording.mp4 -o reel.mp4 --remove-silence --captions 
 (detected silences, the resolved timeline and the caption pages) next to it, and then validates the export.
 With `--captions` it also keeps the source-time `.transcript.json` and the `.captions.ass` file. Pass
 `--transcript` to re-cut or restyle without transcribing again. The checks cover resolution, frame rate, duration, A/V length, and a full decode.
+
+## Audio clean-up
+
+```bash
+npm run reelforge -- edit recording.mp4 -o reel.mp4 --remove-silence --enhance-audio
+npm run reelforge -- edit recording.mp4 -o reel.mp4 --enhance-audio --loudness -16 --denoise strong
+```
+
+In a project file, add `"audio": { "loudness": -14, "denoise": "light" }`. All fields are optional:
+`truePeak`, `highpass`, `compress` and `expand` are the others.
+
+The chain is a high-pass filter (80 Hz), spectral denoising, a soft expander, a 3:1 compressor,
+make-up gain and a peak limiter. Everything is measured on the edited audio (cuts applied), in fast
+audio-only passes:
+
+1. Noise profile: the 10th and 50th percentiles of 100 ms RMS windows, after denoising.
+2. The expander threshold is set 10 dB above the noise floor, never above -30 dBFS. The expander is
+   skipped when that would come within 6 dB of typical speech, so words are never attenuated. Pauses
+   are lowered by at most 18 dB rather than muted.
+3. Loudness is measured, gain is applied with the limiter, loudness is measured again, and the gain
+   is corrected once.
+
+With audio enhancement on, silence detection also runs on the denoised signal, so hiss doesn't hide
+pauses. Every export is checked for clipping (true peak above 0 dBTP, or above the target ceiling);
+enhanced exports are also checked against the loudness target (±1 LU).
+
+Findings that shaped this:
+- FFmpeg's `afftdn` removes only about 5 dB of broadband noise, even with a sampled noise profile.
+  The expander does the heavy lifting in pauses: about 16 dB more on the test fixture.
+- `loudnorm` falls back to dynamic mode when the gain a quiet clip needs would exceed the peak
+  ceiling, and then undershoots on short clips (-15.4 LUFS for a -14 target).
+- `anlmdn` crashed in this FFmpeg build and isn't used.
 
 ## Motion graphics
 

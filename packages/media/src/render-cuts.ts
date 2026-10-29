@@ -2,6 +2,7 @@ import { copyFileSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import type { Timeline } from "@reelforge/core";
+import { analyzeAudio, audioCleanupFilter, type AudioCleanupOptions } from "./audio";
 import { defaultTools, pipeThrough, runOrThrow, runWithInput, type RunResult, type Tools } from "./exec";
 
 export interface RenderCutsOptions {
@@ -16,6 +17,8 @@ export interface RenderCutsOptions {
   captionsFile?: string;
   /** Transparent PNG frames (one per output frame) composited over the footage. */
   overlayFrames?: AsyncIterable<Buffer>;
+  /** Clean up and loudness-normalise the dialogue (two-pass). */
+  audioCleanup?: AudioCleanupOptions;
 }
 
 export interface CutFilterOptions {
@@ -26,6 +29,8 @@ export interface CutFilterOptions {
   captionsFile?: string;
   /** Input 1 is a graphics overlay. */
   overlay?: boolean;
+  /** Filter chain applied to the joined audio. */
+  audioFilter?: string;
 }
 
 /** Name the ASS file is staged under; ffmpeg runs in its directory so no path escaping is needed. */
@@ -63,7 +68,7 @@ const encodeArgs = (fps: number, crf = 20) => [
  * frame grid the timeline was resolved against. Layer order, bottom to top:
  * footage, graphics overlay, captions.
  */
-export function buildCutFilter({ timeline, width, height, hasAudio, captionsFile, overlay }: CutFilterOptions): string {
+export function buildCutFilter({ timeline, width, height, hasAudio, captionsFile, overlay, audioFilter }: CutFilterOptions): string {
   const n = timeline.segments.length;
   if (n === 0) throw new Error("timeline has no segments to render");
   const parts: string[] = [];
@@ -85,7 +90,9 @@ export function buildCutFilter({ timeline, width, height, hasAudio, captionsFile
       concatInputs += `[a${i}]`;
     }
   });
-  parts.push(`${concatInputs}concat=n=${n}:v=1:a=${hasAudio ? 1 : 0}[vcat]${hasAudio ? "[aout]" : ""}`);
+  const audioOut = audioFilter ? "[acat]" : "[aout]";
+  parts.push(`${concatInputs}concat=n=${n}:v=1:a=${hasAudio ? 1 : 0}[vcat]${hasAudio ? audioOut : ""}`);
+  if (hasAudio && audioFilter) parts.push(`[acat]${audioFilter}[aout]`);
 
   let video = "[vcat]";
   if (overlay) {
@@ -125,11 +132,16 @@ export async function renderCuts(opts: RenderCutsOptions, tools: Tools = default
     throw new Error("output path must differ from the source recording");
   }
   const overlay = !!opts.overlayFrames;
+  let audioFilter: string | undefined;
+  if (opts.audioCleanup && opts.hasAudio) {
+    const { profile, gainDb } = await analyzeAudio(resolve(opts.input), opts.timeline, opts.audioCleanup, tools);
+    audioFilter = audioCleanupFilter(opts.audioCleanup, gainDb, profile);
+  }
   const args = [
     "-hide_banner", "-nostats", "-y",
     "-i", resolve(opts.input),
     ...(overlay ? overlayInput(opts.timeline.fps, opts.width, opts.height) : []),
-    "-filter_complex", buildCutFilter({ ...opts, overlay }),
+    "-filter_complex", buildCutFilter({ ...opts, overlay, audioFilter }),
     "-map", "[vout]",
     ...(opts.hasAudio ? ["-map", "[aout]", "-c:a", "aac", "-b:a", "192k"] : []),
     "-frames:v", String(opts.timeline.durationFrames),

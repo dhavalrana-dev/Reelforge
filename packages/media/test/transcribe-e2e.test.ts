@@ -14,6 +14,7 @@ import {
   run,
   runOrThrow,
   transcribe,
+  usableDuration,
   validateOutput,
 } from "../src";
 
@@ -70,8 +71,8 @@ describe.skipIf(!canRun)("transcription + captions (faster-whisper, base.en)", (
   it("keeps captions in sync after silence removal and burns them in", async () => {
     const info = await probe(source);
     const silences = await detectSilences(source, info.duration);
-    const timeline = resolveTimeline(keepRangesFromSilences(silences, info.duration), 30);
-    const removed = info.duration - timeline.durationFrames / 30;
+    const timeline = resolveTimeline(keepRangesFromSilences(silences, usableDuration(info)), 30);
+    const removed = usableDuration(info) - timeline.durationFrames / 30;
     expect(removed).toBeGreaterThan(1);
 
     // "Today" moves earlier by roughly the removed pause. Whisper tends to start

@@ -1,4 +1,5 @@
 import { defaultTools, run, type Tools } from "./exec";
+import { measureOutputLoudness } from "./audio";
 import { probe, type MediaInfo } from "./probe";
 
 export interface OutputExpectations {
@@ -8,7 +9,14 @@ export interface OutputExpectations {
   /** Expected duration in seconds. */
   duration?: number;
   requireAudio?: boolean;
+  /** Expected integrated loudness in LUFS (±1 LU). */
+  loudness?: number;
+  /** True-peak ceiling in dBTP. Without it, anything above 0 dBTP fails as clipping. */
+  truePeak?: number;
 }
+
+/** AAC encoding can lift true peak slightly above the pre-encode ceiling. */
+const TRUE_PEAK_ALLOWANCE = 0.5;
 
 export interface ValidationCheck {
   name: string;
@@ -48,6 +56,15 @@ export async function validateOutput(path: string, expect: OutputExpectations = 
   if (v?.duration != null && info.audio?.duration != null) {
     const drift = Math.abs(v.duration - info.audio.duration);
     add("a/v length match", drift <= SYNC_TOLERANCE, `video ${v.duration.toFixed(3)}s, audio ${info.audio.duration.toFixed(3)}s`);
+  }
+
+  if (info.audio) {
+    const loud = await measureOutputLoudness(path, tools);
+    const ceiling = expect.truePeak !== undefined ? expect.truePeak + TRUE_PEAK_ALLOWANCE : 0;
+    add("audio peak", loud.truePeak <= ceiling, `true peak ${loud.truePeak.toFixed(1)} dBTP (max ${ceiling.toFixed(1)})`);
+    if (expect.loudness !== undefined) {
+      add("loudness", Math.abs(loud.integrated - expect.loudness) <= 1, `${loud.integrated.toFixed(1)} LUFS (target ${expect.loudness})`);
+    }
   }
 
   const decode = await run(tools.ffmpeg, ["-v", "error", "-i", path, "-f", "null", "-"]);

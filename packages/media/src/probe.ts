@@ -110,6 +110,15 @@ export function parseProbe(path: string, json: ProbeJson): MediaInfo {
   };
 }
 
+/**
+ * The part of the file where every stream has content. The container
+ * duration is the longest stream, so editing up to it can ask for video (or
+ * audio) that doesn't exist and desynchronise the export.
+ */
+export function usableDuration(info: MediaInfo): number {
+  return Math.min(info.duration, info.video?.duration ?? Infinity, info.audio?.duration ?? Infinity);
+}
+
 export async function probe(path: string, tools: Tools = defaultTools): Promise<MediaInfo> {
   const { stdout } = await runOrThrow(tools.ffprobe, [
     "-v", "error",
