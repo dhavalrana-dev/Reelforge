@@ -38,10 +38,19 @@ const STAGED_CAPTIONS = "captions.ass";
 
 const sec = (n: number) => n.toFixed(6);
 
-/** Input that reads raw RGBA overlay frames from stdin at the project frame rate, starting at t=0. */
-const overlayInput = (fps: number, width: number, height: number) => [
-  "-f", "rawvideo", "-pix_fmt", "rgba", "-s", `${width}x${height}`, "-framerate", String(fps), "-i", "-",
-];
+/**
+ * How overlay frames reach the main ffmpeg. "raw": decoded to RGBA by
+ * pngToRawRgba first, which cut-and-join graphs need (see there). "png":
+ * piped straight in, which graphs without trim/concat state can take and
+ * which is faster (measured: 22.5 s vs 31.5 s for a 30 s 1080x1920 explainer).
+ */
+type OverlayFormat = "raw" | "png";
+
+/** Input that reads overlay frames from stdin at the project frame rate, starting at t=0. */
+const overlayInput = (format: OverlayFormat, fps: number, width: number, height: number) =>
+  format === "raw"
+    ? ["-f", "rawvideo", "-pix_fmt", "rgba", "-s", `${width}x${height}`, "-framerate", String(fps), "-i", "-"]
+    : ["-f", "image2pipe", "-framerate", String(fps), "-c:v", "png", "-i", "-"];
 
 /**
  * Chromium encodes fully opaque frames as RGB PNGs and everything else as
@@ -108,13 +117,19 @@ export function buildCutFilter({ timeline, width, height, hasAudio, captionsFile
 }
 
 /** Runs ffmpeg, staging the captions file and streaming overlay frames if present. */
-async function runFfmpeg(args: string[], captionsFile: string | undefined, frames: AsyncIterable<Buffer> | undefined, tools: Tools) {
+async function runFfmpeg(
+  args: string[],
+  captionsFile: string | undefined,
+  frames: AsyncIterable<Buffer> | undefined,
+  format: OverlayFormat,
+  tools: Tools,
+) {
   const stage = mkdtempSync(join(tmpdir(), "reelforge-render-"));
   try {
     if (captionsFile) copyFileSync(captionsFile, join(stage, STAGED_CAPTIONS));
     let result: RunResult;
     if (frames) {
-      result = await runWithInput(tools.ffmpeg, args, pngToRawRgba(frames, tools), { cwd: stage });
+      result = await runWithInput(tools.ffmpeg, args, format === "raw" ? pngToRawRgba(frames, tools) : frames, { cwd: stage });
       if (result.code !== 0) {
         throw new Error(`ffmpeg exited with code ${result.code}\n${result.stderr.trim().split("\n").slice(-8).join("\n")}`);
       }
@@ -140,7 +155,7 @@ export async function renderCuts(opts: RenderCutsOptions, tools: Tools = default
   const args = [
     "-hide_banner", "-nostats", "-y",
     "-i", resolve(opts.input),
-    ...(overlay ? overlayInput(opts.timeline.fps, opts.width, opts.height) : []),
+    ...(overlay ? overlayInput("raw", opts.timeline.fps, opts.width, opts.height) : []),
     "-filter_complex", buildCutFilter({ ...opts, overlay, audioFilter }),
     "-map", "[vout]",
     ...(opts.hasAudio ? ["-map", "[aout]", "-c:a", "aac", "-b:a", "192k"] : []),
@@ -148,7 +163,7 @@ export async function renderCuts(opts: RenderCutsOptions, tools: Tools = default
     ...encodeArgs(opts.timeline.fps, opts.crf),
     resolve(opts.output),
   ];
-  await runFfmpeg(args, opts.captionsFile, opts.overlayFrames, tools);
+  await runFfmpeg(args, opts.captionsFile, opts.overlayFrames, "raw", tools);
 }
 
 export interface RenderGraphicsOptions {
@@ -162,6 +177,43 @@ export interface RenderGraphicsOptions {
   overlayFrames: AsyncIterable<Buffer>;
   captionsFile?: string;
   crf?: number;
+  /**
+   * A pre-rendered (usually lower-resolution) background video, scaled up to
+   * the frame size and used instead of the flat colour.
+   */
+  backgroundVideo?: string;
+}
+
+export interface BackgroundPassOptions {
+  output: string;
+  width: number;
+  height: number;
+  fps: number;
+  durationFrames: number;
+  /** "#RRGGBB" where the background frames are transparent. */
+  background: string;
+  frames: AsyncIterable<Buffer>;
+}
+
+/**
+ * Renders the background layer to a lossless intermediate (FFV1 in
+ * Matroska), flattened over the background colour, for renderGraphics to
+ * scale up beneath the foreground.
+ */
+export async function renderBackgroundPass(opts: BackgroundPassOptions, tools: Tools = defaultTools): Promise<void> {
+  if (!/^#[0-9a-f]{6}$/i.test(opts.background)) throw new Error(`invalid background "${opts.background}"`);
+  const seconds = sec(opts.durationFrames / opts.fps);
+  const args = [
+    "-hide_banner", "-nostats", "-y",
+    "-f", "lavfi", "-i", `color=c=0x${opts.background.slice(1)}:s=${opts.width}x${opts.height}:r=${opts.fps}:d=${seconds}`,
+    ...overlayInput("png", opts.fps, opts.width, opts.height),
+    "-filter_complex", `[0:v][1:v]${OVERLAY},format=bgr0[vout]`,
+    "-map", "[vout]",
+    "-frames:v", String(opts.durationFrames),
+    "-c:v", "ffv1", "-level", "3", "-g", "1",
+    resolve(opts.output),
+  ];
+  await runFfmpeg(args, undefined, opts.frames, "png", tools);
 }
 
 /**
@@ -172,17 +224,21 @@ export async function renderGraphics(opts: RenderGraphicsOptions, tools: Tools =
   if (!/^#[0-9a-f]{6}$/i.test(opts.background)) throw new Error(`invalid background "${opts.background}"`);
   const seconds = sec(opts.durationFrames / opts.fps);
   const video = opts.captionsFile ? `${OVERLAY},ass=${STAGED_CAPTIONS}` : OVERLAY;
+  const base = opts.backgroundVideo
+    ? ["-i", resolve(opts.backgroundVideo)]
+    : ["-f", "lavfi", "-i", `color=c=0x${opts.background.slice(1)}:s=${opts.width}x${opts.height}:r=${opts.fps}:d=${seconds}`];
+  const baseChain = opts.backgroundVideo ? `[0:v]scale=${opts.width}:${opts.height}:flags=bicubic,setsar=1[base];[base]` : "[0:v]";
   const args = [
     "-hide_banner", "-nostats", "-y",
-    "-f", "lavfi", "-i", `color=c=0x${opts.background.slice(1)}:s=${opts.width}x${opts.height}:r=${opts.fps}:d=${seconds}`,
-    ...overlayInput(opts.fps, opts.width, opts.height),
+    ...base,
+    ...overlayInput("png", opts.fps, opts.width, opts.height),
     "-f", "lavfi", "-i", "anullsrc=r=48000:cl=stereo",
-    "-filter_complex", `[0:v][1:v]${video}[vout]`,
+    "-filter_complex", `${baseChain}[1:v]${video}[vout]`,
     "-map", "[vout]", "-map", "2:a",
     "-c:a", "aac", "-b:a", "128k",
     "-frames:v", String(opts.durationFrames), "-t", seconds,
     ...encodeArgs(opts.fps, opts.crf),
     resolve(opts.output),
   ];
-  await runFfmpeg(args, opts.captionsFile, opts.overlayFrames, tools);
+  await runFfmpeg(args, opts.captionsFile, opts.overlayFrames, "png", tools);
 }

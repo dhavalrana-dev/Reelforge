@@ -94,7 +94,7 @@ npm run reelforge -- render examples/prompt-to-video/how-websites-load.json -o h
 
 [`examples/prompt-to-video/how-websites-load.json`](examples/prompt-to-video/how-websites-load.json)
 is the blueprint's example prompt, built as a 30 s Reel with seven scenes: hook, browser, request
-journey, timing chart, total, tips, call to action. It renders in about 73 s on this machine.
+journey, timing chart, total, tips, call to action. It renders in about 36 s on this machine.
 
 Scenes overlap freely; that's how layers work, with later scenes drawn on top. Component props are
 validated strictly, so a misspelt prop is an error that names it rather than something silently
@@ -221,10 +221,20 @@ painted once and reused.
 - Captions use system fonts (Arial, Arial Black) for now. Bundled fonts need a license review first.
 - Rendering uses the system Edge or Chrome unless `REELFORGE_CHROMIUM` is set. The installer should
   ship a pinned Chromium (plus licensed fonts) so frames are identical on every machine.
-- Rendering speed on this machine (1080x1920): about 15 fps for a 9 s full-screen explainer with 4
-  workers. Each worker is a separate browser process, because pages inside one browser share a
-  capture pipeline. Full-frame animated backgrounds are the slowest case, since gradient dithering
-  compresses badly.
+- Rendering speed on this machine (1080x1920, 4 workers): the 30 s prompt-to-video example renders
+  in about 36 s (25 fps), down from 73 s. Each worker is a separate browser process, because pages
+  inside one browser share a capture pipeline. What was measured, and the two changes that came out
+  of it:
+  - A full-frame dithered gradient was the bottleneck: 23 fps and 1.5 MB per PNG, against 114 fps
+    for all the foreground graphics together. Background-layer components (`backdrop`) now render
+    in their own pass at quarter size into a lossless intermediate, which the main encode scales up
+    beneath the foreground. Drawing small and scaling up with CSS doesn't help, because Chromium
+    rasterises and encodes at the final size. This applies to videos without footage.
+  - Graphics-only renders pipe PNGs straight into FFmpeg (22.5 s against 31.5 s through the RGBA
+    decode stage). Renders over footage keep the decode stage, because their cut graph can't
+    survive a mid-stream format change.
+  - With footage, the H.264 encode competes with the browsers for CPU. That's the remaining cost
+    (rendering alone runs at about 85 fps for this example's foreground).
 - `still` doesn't draw captions yet.
 - In portrait frames, components keep their content above `CAPTION_ZONE_TOP` (68% of the height),
   so burned-in captions never cover them.

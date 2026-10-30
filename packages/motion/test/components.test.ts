@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { validateProject, type Project } from "@reelforge/core";
-import { COMPONENTS, componentSchema, projectSchemaWithComponents, renderFrameHtml, validateComposition } from "../src";
+import { COMPONENTS, componentSchema, projectSchemaWithComponents, renderFrameHtml, splitBackground, validateComposition } from "../src";
 
 const example = JSON.parse(
   readFileSync(fileURLToPath(new URL("../../../examples/prompt-to-video/how-websites-load.json", import.meta.url)), "utf8"),
@@ -54,6 +54,16 @@ describe("components", () => {
     expect(schema.safeParse({ type: "counter", to: 5 }).success).toBe(true);
     expect(schema.safeParse({ type: "counter" }).success).toBe(false);
     expect(schema.safeParse({ type: "sparkles" }).success).toBe(false);
+  });
+
+  it("splits background components into a quarter-size layer that keeps scene timing", () => {
+    const { background, foreground } = splitBackground(validateProject(example).project!);
+    expect(background!.project).toMatchObject({ width: 270, height: 480, fps: 30 });
+    expect(background!.scenes.map((s) => [s.id, s.startFrame, s.durationFrames, s.transition])).toEqual([["background", 0, 900, "cut"]]);
+    expect(foreground.project).toMatchObject({ width: 1080, height: 1920 });
+    expect(foreground.scenes.some((s) => s.components.some((c) => c.type === "backdrop"))).toBe(false);
+    expect(foreground.scenes).toHaveLength(7);
+    expect(splitBackground(projectWith([{ type: "counter", to: 1 }])).background).toBeNull();
   });
 
   it("the prompt-to-video example is valid against the full schema", () => {

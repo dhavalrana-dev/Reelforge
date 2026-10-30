@@ -111,6 +111,31 @@ describe.skipIf(!browserAvailable)("frame renderer (Chromium)", () => {
     expect(isRed(await centrePixel(output, 59))).toBe(true);
   }, 120_000);
 
+  it("renders a backdrop in its own low-resolution pass, beneath frame-aligned graphics", async () => {
+    const file = join(dir, "layers.json");
+    writeFileSync(
+      file,
+      JSON.stringify({
+        schemaVersion: "1.0",
+        project: { name: "layers", width: 540, height: 960, fps: 30 },
+        theme: "dark-tech",
+        scenes: [
+          // Listed after the rect on purpose: background components always draw beneath.
+          { id: "red", startFrame: 30, durationFrames: 15, transition: "cut", components: [{ type: "rect", x: 40, y: 40, w: 20, h: 20, color: "#FF0000" }] },
+          { id: "bg", startFrame: 0, durationFrames: 60, transition: "cut", components: [{ type: "backdrop" }] },
+        ],
+      }),
+    );
+    const output = join(dir, "layers.mp4");
+    const result = await renderProject(file, output, { concurrency: 2 });
+    expect(result.report.checks.filter((c) => !c.ok)).toEqual([]);
+    expect(result.stats.painted).toBeGreaterThanOrEqual(60); // the background pass painted every frame
+    const [r, g, b] = await centrePixel(output, 29);
+    expect(Math.max(r, g, b)).toBeLessThan(90); // dark-tech backdrop, no rect yet
+    expect(isRed(await centrePixel(output, 30))).toBe(true);
+    expect(isRed(await centrePixel(output, 45))).toBe(false);
+  }, 120_000);
+
   it("graphics stay frame-aligned with footage after cuts", async () => {
     const source = join(dir, "blue.mp4");
     await runOrThrow(defaultTools.ffmpeg, [

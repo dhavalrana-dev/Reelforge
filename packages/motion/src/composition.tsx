@@ -17,6 +17,12 @@ interface RegisteredComponent {
   props: AnyZodObject;
   /** One line for agents choosing a component. */
   description: string;
+  /**
+   * Soft, full-frame visuals that can be drawn at 1/BACKGROUND_DOWNSCALE size
+   * and scaled up without visible difference. In videos without footage they
+   * render in a separate low-resolution pass beneath everything else.
+   */
+  layer?: "background";
   // Props are validated against `props` before rendering.
   render: ComponentType<any>;
 }
@@ -42,7 +48,12 @@ export const COMPONENTS: Record<string, RegisteredComponent> = {
   "bullet-list": { props: BulletListProps, render: BulletList, description: "Optional heading and up to 6 items sliding in with check, dot or number markers." },
   counter: { props: CounterProps, render: Counter, description: "Large number counting up, with prefix, suffix and label." },
   rect: { props: RectProps, render: Rect, description: "Plain rectangle positioned in percent of the frame." },
-  backdrop: { props: BackdropProps, render: Backdrop, description: "Full-frame theme background with a slowly drifting glow, for videos without footage." },
+  backdrop: {
+    props: BackdropProps,
+    render: Backdrop,
+    layer: "background",
+    description: "Full-frame theme background with a slowly drifting glow, for videos without footage. Always drawn beneath other components.",
+  },
 };
 
 /** A component entry in a project file: its type plus that component's props. */
@@ -58,6 +69,36 @@ export function projectSchemaWithComponents() {
   return ProjectSchema.extend({
     scenes: z.array(SceneSchema.extend({ components: z.array(componentSchema()) })).default([]),
   });
+}
+
+/**
+ * Background-layer components render at this fraction of the frame size. A
+ * full-frame dithered gradient PNG-encodes about 5x slower than everything
+ * else in a typical explainer (measured at 1080x1920: 23 fps vs 116 fps at
+ * quarter size), and soft gradients look the same scaled up.
+ */
+export const BACKGROUND_DOWNSCALE = 4;
+
+const isBackground = (type: string) => COMPONENTS[type]?.layer === "background";
+
+/**
+ * Splits a project into a low-resolution background layer (null when it has
+ * none) and the full-resolution foreground. Scene timing and transitions are
+ * kept on both, so a fading scene fades in both layers alike.
+ */
+export function splitBackground(project: Project): { background: Project | null; foreground: Project } {
+  const pick = (keep: (type: string) => boolean) =>
+    project.scenes
+      .map((scene) => ({ ...scene, components: scene.components.filter((c) => keep(c.type)) }))
+      .filter((scene) => scene.components.length > 0);
+  const bgScenes = pick(isBackground);
+  const even = (n: number) => Math.max(2, Math.round(n / BACKGROUND_DOWNSCALE / 2) * 2);
+  return {
+    background: bgScenes.length
+      ? { ...project, project: { ...project.project, width: even(project.project.width), height: even(project.project.height) }, scenes: bgScenes }
+      : null,
+    foreground: { ...project, scenes: pick((type) => !isBackground(type)) },
+  };
 }
 
 /** Frames a "fade" scene takes to fade in and out. */

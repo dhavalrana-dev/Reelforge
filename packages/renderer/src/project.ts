@@ -1,4 +1,6 @@
+import { mkdtempSync, rmSync } from "node:fs";
 import { writeFile, readFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { basename, dirname, extname, isAbsolute, join, resolve } from "node:path";
 import {
   TranscriptSchema,
@@ -18,13 +20,14 @@ import {
   probe,
   usableDuration,
   renderCuts,
+  renderBackgroundPass,
   renderGraphics,
   runWithInput,
   validateOutput,
   type CaptionStyleName,
   type ValidationReport,
 } from "@reelforge/media";
-import { getTheme } from "@reelforge/motion";
+import { getTheme, splitBackground } from "@reelforge/motion";
 import { FrameRenderer, type RenderStats } from "./frame-renderer";
 
 export interface LoadedProject {
@@ -107,7 +110,38 @@ export async function renderProject(projectFile: string, output: string, opts: R
   }
   const captionsFile = await writeCaptions(loaded, p, output);
 
-  const renderer = await FrameRenderer.create(project, { concurrency: opts.concurrency });
+  // Without footage, background-layer components render in their own
+  // low-resolution pass first; the main pass then draws only the foreground.
+  const layers = p.footage ? null : splitBackground(project);
+  const stats: RenderStats = { painted: 0, reused: 0, empty: 0 };
+  const addStats = (s: RenderStats) => {
+    stats.painted += s.painted;
+    stats.reused += s.reused;
+    stats.empty += s.empty;
+  };
+  const stage = layers?.background ? mkdtempSync(join(tmpdir(), "reelforge-bg-")) : null;
+  let backgroundVideo: string | undefined;
+  if (layers?.background && stage) {
+    const bg = layers.background;
+    const bgRenderer = await FrameRenderer.create(bg, { concurrency: opts.concurrency });
+    try {
+      backgroundVideo = join(stage, "background.mkv");
+      await renderBackgroundPass({
+        output: backgroundVideo,
+        width: bg.project.width,
+        height: bg.project.height,
+        fps,
+        durationFrames: p.durationFrames,
+        background: project.background ?? getTheme(project.theme).background,
+        frames: bgRenderer.frames(0, p.durationFrames),
+      });
+    } finally {
+      await bgRenderer.close();
+      addStats(bgRenderer.stats);
+    }
+  }
+
+  const renderer = await FrameRenderer.create(layers ? layers.foreground : project, { concurrency: opts.concurrency });
   try {
     async function* frames() {
       let done = 0;
@@ -130,10 +164,12 @@ export async function renderProject(projectFile: string, output: string, opts: R
       });
     } else {
       const background = project.background ?? getTheme(project.theme).background;
-      await renderGraphics({ output, width, height, fps, durationFrames: p.durationFrames, background, overlayFrames: frames(), captionsFile });
+      await renderGraphics({ output, width, height, fps, durationFrames: p.durationFrames, background, overlayFrames: frames(), captionsFile, backgroundVideo });
     }
   } finally {
     await renderer.close();
+    addStats(renderer.stats);
+    if (stage) rmSync(stage, { recursive: true, force: true });
   }
 
   const report = await validateOutput(output, {
@@ -144,7 +180,7 @@ export async function renderProject(projectFile: string, output: string, opts: R
     requireAudio: p.footage ? p.footage.hasAudio : true,
     ...(p.footage?.hasAudio && project.audio ? { loudness: project.audio.loudness, truePeak: project.audio.truePeak } : {}),
   });
-  return { durationFrames: p.durationFrames, stats: renderer.stats, seconds: (Date.now() - started) / 1000, warnings: loaded.warnings, report };
+  return { durationFrames: p.durationFrames, stats, seconds: (Date.now() - started) / 1000, warnings: loaded.warnings, report };
 }
 
 /**
