@@ -41,6 +41,15 @@ When the user describes a video instead of supplying footage:
 
 Keep on-screen text short (under about 8 words per line) and use the `highlight` options for the key word.
 
+## Generative apps (optional)
+
+Only when `reelforge doctor` reports a generative backend as OK:
+
+1. Run `reelforge gen apps` to find an app, then `reelforge gen info <app>` for its inputs and model licences.
+2. If the app shows "licence review", tell the user which models and licences are involved and get their decision before passing `--accept-license`. Never pass it on their behalf without asking.
+3. Never pass `--allow-sensitive` unless the user confirms they have consent from everyone whose face, body or voice is altered.
+4. Run `reelforge gen run <app> --file <input>=<path> --set <key>=<value> -o <dir>`, then use the output files like any other footage.
+
 ## Rules
 
 - Never write the output over the source recording. The CLI refuses to do it, so don't work around that.

@@ -34,6 +34,7 @@ import {
 import { COMPONENTS, THEMES, projectSchemaWithComponents, validateComposition } from "@reelforge/motion";
 import { zodToJsonSchema } from "zod-to-json-schema";
 import { planRecording, renderProject, renderStill } from "@reelforge/renderer";
+import { checkPolicy, configuredProvider, generate, isPermissive, type GenerativeProvider, type GenerativeValue } from "@reelforge/generative";
 
 const program = new Command();
 program.name("reelforge").description("REELFORGE AI: video editing and programmatic video for AI coding agents").version("0.1.0");
@@ -76,6 +77,13 @@ program
   .option("--json", "machine-readable output")
   .action(async (opts) => {
     const checks = await runDoctor();
+    const provider = configuredProvider();
+    if (provider) {
+      const h = await provider.health();
+      checks.push({ name: "Generative backend", status: h.ok ? "ok" : "warn", detail: h.detail });
+    } else {
+      checks.push({ name: "Generative backend", status: "ok", detail: "off (set REELFORGE_FREEFIELD_URL to use a Freefield server)" });
+    }
     print(opts.json, checks, () => {
       const icon = { ok: "OK  ", warn: "WARN", fail: "FAIL" };
       for (const c of checks) console.log(`[${icon[c.status]}] ${c.name}: ${c.detail}`);
@@ -370,6 +378,107 @@ program
     for (const e of componentErrors) console.log(`ERROR ${e}`);
     if (!issues.length && !componentErrors.length) console.log("project is valid");
     if (issues.some((i) => i.level === "error") || componentErrors.length) process.exitCode = 1;
+  });
+
+function requireProvider(): GenerativeProvider {
+  const provider = configuredProvider();
+  if (!provider) throw new Error("no generative backend: set REELFORGE_FREEFIELD_URL (e.g. http://127.0.0.1:3000, a Freefield server)");
+  return provider;
+}
+
+const collect = (value: string, previous: string[]) => [...previous, value];
+
+/** Splits "key=value" (value may contain "="). */
+function keyValue(pair: string): [string, string] {
+  const i = pair.indexOf("=");
+  if (i <= 0) throw new Error(`expected key=value, got "${pair}"`);
+  return [pair.slice(0, i), pair.slice(i + 1)];
+}
+
+const gen = program.command("gen").description("optional generative apps on a Freefield server (off unless REELFORGE_FREEFIELD_URL is set)");
+
+gen
+  .command("apps")
+  .description("list the server's apps with licence status and VRAM")
+  .option("--json", "machine-readable output")
+  .action(async (opts) => {
+    const apps = await requireProvider().listApps();
+    print(opts.json, apps, () => {
+      for (const a of apps) {
+        const verdict = checkPolicy(a);
+        const license = verdict.reviewLicenses.length ? "licence review" : "commercial-ok";
+        const vram = a.vram?.measuredGb ?? a.vram?.largestPhaseGb ?? a.vram?.wholeGb;
+        const flags = [license, verdict.sensitive ? "likeness" : "", a.runnable ? "" : "not runnable"].filter(Boolean).join(", ");
+        console.log(`${a.id.padEnd(24)} ${a.section.padEnd(8)} ${vram !== undefined && vram !== null ? `${vram.toFixed(1)} GB`.padStart(8) : "".padStart(8)}  ${flags}`);
+      }
+      console.log(`${apps.length} apps. "reelforge gen info <app>" shows inputs and model licences.`);
+    });
+  });
+
+gen
+  .command("info <app>")
+  .description("an app's inputs, outputs and models with licences")
+  .action(async (id) => {
+    const app = (await requireProvider().listApps()).find((a) => a.id === id);
+    if (!app) throw new Error(`no app "${id}"; see "reelforge gen apps"`);
+    console.log(`${app.name} (${app.id}): ${app.summary}`);
+    console.log("inputs:");
+    for (const i of app.inputs) {
+      const detail = [
+        i.required ? "required" : "",
+        i.options ? `one of ${i.options.join("|")}` : "",
+        i.min !== undefined ? `${i.min}..${i.max}` : "",
+        i.maxMb !== undefined ? `max ${i.maxMb} MB` : "",
+        i.default !== undefined ? `default ${JSON.stringify(i.default)}` : "",
+      ].filter(Boolean).join(", ");
+      const flag = ["image", "video", "audio"].includes(i.type) ? `--file ${i.id}=path` : `--set ${i.id}=value`;
+      console.log(`  ${flag.padEnd(26)} ${i.type.padEnd(8)} ${i.label}${detail ? ` (${detail})` : ""}`);
+    }
+    console.log(`outputs: ${app.outputs.map((o) => `${o.type}${o.label ? ` "${o.label}"` : ""}`).join(", ")}`);
+    console.log("models:");
+    for (const m of app.models) console.log(`  ${isPermissive(m.license) ? "ok    " : "REVIEW"} ${m.name} (${m.license ?? "no licence stated"})${m.repo ? ` ${m.repo}` : ""}`);
+    const verdict = checkPolicy(app);
+    for (const r of verdict.reasons) console.log(`note: ${r}`);
+  });
+
+gen
+  .command("run <app>")
+  .description("run an app and download its outputs, each with a provenance record")
+  .requiredOption("-o, --output <dir>", "directory for the outputs")
+  .option("--set <key=value>", "an input value (repeatable)", collect, [])
+  .option("--file <key=path>", "a file input (repeatable)", collect, [])
+  .option("--preset <id>", "an app preset")
+  .option("--timeout <seconds>", "cancel the run after this long", "1800")
+  .option("--accept-license", "you reviewed the licences of this app's non-permissive models for your use")
+  .option("--allow-sensitive", "you have consent from everyone whose likeness or voice this app alters")
+  .action(async (id, opts) => {
+    const provider = requireProvider();
+    const app = (await provider.listApps()).find((a) => a.id === id);
+    if (!app) throw new Error(`no app "${id}"; see "reelforge gen apps"`);
+    const values: Record<string, GenerativeValue> = {};
+    for (const pair of opts.set as string[]) {
+      const [k, v] = keyValue(pair);
+      values[k] = v;
+    }
+    for (const pair of opts.file as string[]) {
+      const [k, v] = keyValue(pair);
+      values[k] = { file: resolve(v) };
+    }
+    let lastStatus = "";
+    const result = await generate(provider, app, values, {
+      outDir: opts.output,
+      preset: opts.preset,
+      timeoutMs: Number(opts.timeout) * 1000,
+      acceptLicense: !!opts.acceptLicense,
+      allowSensitive: !!opts.allowSensitive,
+      onProgress: (status, progress) => {
+        const line = `${status}${progress !== null ? ` ${Math.round(progress * 100)}%` : ""}`;
+        if (line !== lastStatus) console.log(`  ${line}`);
+        lastStatus = line;
+      },
+    });
+    for (const o of result.outputs) console.log(`wrote ${o.path} (${o.type}${o.name ? `, ${o.name}` : ""})`);
+    console.log(`run ${result.runId}${result.seconds !== null ? `, ${result.seconds.toFixed(1)} s on the GPU` : ""}; provenance next to each file`);
   });
 
 program.parseAsync().catch((err: Error) => {

@@ -20,6 +20,7 @@ the recorded-video workflow.
 | `@reelforge/motion` components: `kinetic-text`, `lower-third`, `network-diagram`, `counter`, `rect`, `backdrop`; themes `dark-tech`, `clean-pro` | Done |
 | `@reelforge/renderer` Chromium frame renderer, streamed into FFmpeg over footage or a background | Done |
 | CLI: `render`, `still`, `components` | Done |
+| Optional generative backend: Freefield adapter, `reelforge gen apps/info/run`, licence and likeness policy, provenance records | Done (tested against a stand-in server) |
 | Prompt-to-video: `browser-window`, `bar-chart`, `bullet-list` components; `reelforge schema` (JSON Schema for agents); strict prop validation; 30 s example | Done |
 | Audio clean-up: high-pass, denoise, noise-floor-driven expander, compression, loudness target with peak limiting; loudness and clipping checks | Done |
 | Audio enhancement (loudness normalisation, denoise) | Not started |
@@ -98,6 +99,43 @@ journey, timing chart, total, tips, call to action. It renders in about 73 s on 
 Scenes overlap freely; that's how layers work, with later scenes drawn on top. Component props are
 validated strictly, so a misspelt prop is an error that names it rather than something silently
 ignored.
+
+## Generative apps (optional)
+
+REELFORGE's own pipeline is deterministic and runs locally. Model-generated media (background
+cut-outs, upscales, generated clips, music) comes from an optional backend:
+[Freefield](https://github.com/neuregex/freefield), open-weight ComfyUI workflows run on your own GPU or
+on Modal. REELFORGE talks only to Freefield's web server over HTTP, so it needs no Python, ComfyUI or
+GPU of its own. It's off until configured:
+
+```bash
+# Freefield running somewhere (its README: `npm run serve`, backend on a local GPU or Modal)
+export REELFORGE_FREEFIELD_URL=http://127.0.0.1:3000
+# export REELFORGE_FREEFIELD_PASSCODE=...   # for a hosted Freefield demo
+
+npm run reelforge -- doctor                       # shows whether the backend answers
+npm run reelforge -- gen apps                     # every app: VRAM, licence status, likeness flag
+npm run reelforge -- gen info video-remove-bg     # inputs, outputs, models with licences
+npm run reelforge -- gen run video-remove-bg --file clip=talk.mp4 --set background=green -o out/gen
+```
+
+The outputs are ordinary files. Use them as project `sources`, or run `edit`/`plan` on them.
+
+Safeguards:
+- **Licences:** an app runs without confirmation only when every model it uses has a permissive
+  licence (MIT, Apache-2.0, BSD, CC-BY-4.0, CC0, ISC, Unlicense). Community, non-commercial or
+  unstated licences need `--accept-license` after you have reviewed them for your use.
+- **Likeness:** apps that alter a person's face, body or voice (face swap, character swap, dub, speak,
+  AI influencer, and so on) are refused without `--allow-sensitive`. Use that flag only with the
+  consent of everyone shown.
+- **Provenance:** every output gets `<file>.provenance.json`, recording the app, run id, models and
+  their licences, what was accepted, and the settings.
+- Server responses are validated. Downloads must come from the same server, and output file names
+  are made locally.
+
+On an 8 GB GPU like this machine's, the small apps run locally: background removal (about 0.4 GB),
+depth maps, frame smoothing, and upscaling (about 4 GB). Video generation needs 15–44 GB, which in
+practice means Modal.
 
 ## Audio clean-up
 
