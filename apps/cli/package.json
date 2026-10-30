@@ -9,8 +9,9 @@
   "dependencies": {
     "@reelforge/core": "0.1.0",
     "@reelforge/media": "0.1.0",
-    "@reelforge/renderer": "0.1.0",
     "@reelforge/motion": "0.1.0",
-    "commander": "^12.1.0"
+    "@reelforge/renderer": "0.1.0",
+    "commander": "^12.1.0",
+    "zod-to-json-schema": "^3.25.2"
   }
 }

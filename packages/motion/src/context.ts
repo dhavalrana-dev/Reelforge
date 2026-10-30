@@ -34,6 +34,7 @@ export const CAPTION_ZONE_TOP = 0.68;
 /** Vertical anchor for a named slot, as a fraction of frame height (safe-area aware). */
 export function slotY(position: "top" | "center" | "bottom", portrait: boolean): number {
   if (position === "top") return portrait ? 0.16 : 0.14;
-  if (position === "bottom") return portrait ? 0.66 : 0.78;
+  // Portrait "bottom" is centred well above CAPTION_ZONE_TOP so two-line text clears the captions.
+  if (position === "bottom") return portrait ? 0.6 : 0.78;
   return 0.5;
 }

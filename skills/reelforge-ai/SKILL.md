@@ -1,6 +1,6 @@
 ---
 name: reelforge-ai
-description: Edit recorded videos into short-form Reels (silence removal, reframing to 9:16/16:9/1:1, validated MP4 export) using the local REELFORGE CLI. Use when the user asks to cut, tighten, reframe, or export a video file.
+description: Edit recorded videos into short-form Reels (silence removal, captions, audio clean-up, motion graphics, validated MP4 export), or create motion-graphics videos from a prompt, using the local REELFORGE CLI. Use when the user asks to cut, caption, reframe or export a video file, or to make an animated explainer video.
 ---
 
 # REELFORGE AI
@@ -27,6 +27,19 @@ For graphics over footage, or a video built only from graphics:
 3. Run `reelforge render <project.json> -o <out.mp4>` and report its validation checks.
 
 Prefer the built-in components. Don't write custom HTML or scripts into project files.
+
+## Prompt to video
+
+When the user describes a video instead of supplying footage:
+
+1. Write a short storyboard first: one line per scene with its purpose, the component, and its length in seconds. At 30 fps, frames = seconds × 30. A 30 s Reel is about 6–8 scenes, and each needs time to read: 3–7 s.
+2. Get the exact props with `reelforge schema -o project.schema.json`. `examples/prompt-to-video/how-websites-load.json` is a complete 30 s example to start from.
+3. Write the project. Put a full-length `backdrop` scene first, then the content scenes; scenes listed later draw on top. Use `"transition": "cut"` only when a hard cut is intended.
+4. Run `reelforge project-validate <project.json>` and fix every error it names.
+5. Render a still from the middle of each scene and view them. Check that text is readable and nothing collides. In portrait, keep content above 68% of the height when captions will be added.
+6. Run `reelforge render <project.json> -o <out.mp4>` and report the checks.
+
+Keep on-screen text short (under about 8 words per line) and use the `highlight` options for the key word.
 
 ## Rules
 

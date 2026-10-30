@@ -1,7 +1,10 @@
-import { mapRange, type Project, type Scene } from "@reelforge/core";
+import { ProjectSchema, SceneSchema, mapRange, type Project, type Scene } from "@reelforge/core";
 import type { ComponentType } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import type { ZodTypeAny } from "zod";
+import { z, type AnyZodObject } from "zod";
+import { BarChart, BarChartProps } from "./components/bar-chart";
+import { BrowserWindow, BrowserWindowProps } from "./components/browser-window";
+import { BulletList, BulletListProps } from "./components/bullet-list";
 import { Counter, CounterProps } from "./components/counter";
 import { KineticText, KineticTextProps } from "./components/kinetic-text";
 import { LowerThird, LowerThirdProps } from "./components/lower-third";
@@ -11,19 +14,51 @@ import type { FrameContext } from "./context";
 import { getTheme, type Theme } from "./theme";
 
 interface RegisteredComponent {
-  props: ZodTypeAny;
+  props: AnyZodObject;
+  /** One line for agents choosing a component. */
+  description: string;
   // Props are validated against `props` before rendering.
   render: ComponentType<any>;
 }
 
 export const COMPONENTS: Record<string, RegisteredComponent> = {
-  "kinetic-text": { props: KineticTextProps, render: KineticText },
-  "lower-third": { props: LowerThirdProps, render: LowerThird },
-  "network-diagram": { props: NetworkDiagramProps, render: NetworkDiagram },
-  counter: { props: CounterProps, render: Counter },
-  rect: { props: RectProps, render: Rect },
-  backdrop: { props: BackdropProps, render: Backdrop },
+  "kinetic-text": {
+    props: KineticTextProps,
+    render: KineticText,
+    description: "Headline text: word-by-word reveal, fade-up or typewriter; highlight words in the accent colour.",
+  },
+  "lower-third": { props: LowerThirdProps, render: LowerThird, description: "Name strap with title and optional subtitle." },
+  "network-diagram": {
+    props: NetworkDiagramProps,
+    render: NetworkDiagram,
+    description: "2-6 labelled nodes that appear in sequence, linked by lines that draw themselves, with data packets flowing.",
+  },
+  "browser-window": {
+    props: BrowserWindowProps,
+    render: BrowserWindow,
+    description: "Browser mock-up: URL types itself, loading bar runs, page skeleton and headline appear.",
+  },
+  "bar-chart": { props: BarChartProps, render: BarChart, description: "Up to 7 horizontal bars growing in sequence with counting values." },
+  "bullet-list": { props: BulletListProps, render: BulletList, description: "Optional heading and up to 6 items sliding in with check, dot or number markers." },
+  counter: { props: CounterProps, render: Counter, description: "Large number counting up, with prefix, suffix and label." },
+  rect: { props: RectProps, render: Rect, description: "Plain rectangle positioned in percent of the frame." },
+  backdrop: { props: BackdropProps, render: Backdrop, description: "Full-frame theme background with a slowly drifting glow, for videos without footage." },
 };
+
+/** A component entry in a project file: its type plus that component's props. */
+export function componentSchema() {
+  const variants = Object.entries(COMPONENTS).map(([type, c]) =>
+    z.object({ type: z.literal(type) }).merge(c.props).strict().describe(c.description),
+  );
+  return z.discriminatedUnion("type", variants as unknown as [AnyZodObject, AnyZodObject, ...AnyZodObject[]]);
+}
+
+/** The full project schema with every component's props spelled out (for JSON Schema export). */
+export function projectSchemaWithComponents() {
+  return ProjectSchema.extend({
+    scenes: z.array(SceneSchema.extend({ components: z.array(componentSchema()) })).default([]),
+  });
+}
 
 /** Frames a "fade" scene takes to fade in and out. */
 const FADE_FRAMES = 6;
@@ -41,7 +76,8 @@ export function validateComposition(project: Project): string[] {
         return;
       }
       const { type: _type, ...props } = c;
-      const parsed = reg.props.safeParse(props);
+      // Strict: a misspelt prop is an error, not silently ignored.
+      const parsed = reg.props.strict().safeParse(props);
       if (!parsed.success) {
         for (const issue of parsed.error.issues) errors.push(`${where}.${issue.path.join(".") || "(props)"}: ${issue.message}`);
       }

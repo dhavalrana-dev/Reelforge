@@ -1,0 +1,81 @@
+{
+  "schemaVersion": "1.0",
+  "project": { "name": "How Websites Load", "width": 1080, "height": 1920, "fps": 30 },
+  "theme": "dark-tech",
+  "scenes": [
+    {
+      "id": "background",
+      "startFrame": 0,
+      "durationFrames": 900,
+      "transition": "cut",
+      "components": [{ "type": "backdrop", "period": 10 }]
+    },
+    {
+      "id": "hook",
+      "startFrame": 0,
+      "durationFrames": 90,
+      "components": [
+        { "type": "kinetic-text", "text": "What happens when you open a website?", "highlight": ["website?"], "size": 9 }
+      ]
+    },
+    {
+      "id": "address",
+      "startFrame": 90,
+      "durationFrames": 180,
+      "components": [
+        { "type": "browser-window", "url": "www.example.com", "headline": "Hello, world", "typeSpeed": 2 },
+        { "type": "kinetic-text", "text": "1. You type an address", "position": "bottom", "size": 5.5, "animation": "fade-up", "delay": 8 }
+      ]
+    },
+    {
+      "id": "journey",
+      "startFrame": 270,
+      "durationFrames": 180,
+      "components": [
+        { "type": "network-diagram", "nodes": ["Browser", "DNS", "Server", "Database"], "step": 16 }
+      ]
+    },
+    {
+      "id": "timing",
+      "startFrame": 450,
+      "durationFrames": 180,
+      "components": [
+        {
+          "type": "bar-chart",
+          "title": "Where the time goes",
+          "unit": " ms",
+          "highlight": 4,
+          "bars": [
+            { "label": "DNS lookup", "value": 20 },
+            { "label": "Connection", "value": 45 },
+            { "label": "Server response", "value": 180 },
+            { "label": "Download", "value": 90 },
+            { "label": "Rendering", "value": 240 }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "total",
+      "startFrame": 630,
+      "durationFrames": 90,
+      "components": [{ "type": "counter", "to": 575, "suffix": " ms", "label": "from tap to pixels", "duration": 40 }]
+    },
+    {
+      "id": "tips",
+      "startFrame": 720,
+      "durationFrames": 105,
+      "components": [
+        { "type": "bullet-list", "title": "Make it faster", "items": ["Use a CDN", "Compress images", "Cache everything"], "stagger": 12 }
+      ]
+    },
+    {
+      "id": "cta",
+      "startFrame": 825,
+      "durationFrames": 75,
+      "components": [
+        { "type": "kinetic-text", "text": "Follow for more web explainers", "highlight": ["Follow"], "size": 8.5, "stagger": 4 }
+      ]
+    }
+  ]
+}

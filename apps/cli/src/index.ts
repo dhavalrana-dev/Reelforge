@@ -31,7 +31,8 @@ import {
   validateOutput,
   type CaptionStyleName,
 } from "@reelforge/media";
-import { COMPONENTS, THEMES } from "@reelforge/motion";
+import { COMPONENTS, THEMES, projectSchemaWithComponents, validateComposition } from "@reelforge/motion";
+import { zodToJsonSchema } from "zod-to-json-schema";
 import { planRecording, renderProject, renderStill } from "@reelforge/renderer";
 
 const program = new Command();
@@ -330,9 +331,26 @@ program
   .command("components")
   .description("list motion components and themes")
   .action(() => {
-    console.log(`components: ${Object.keys(COMPONENTS).join(", ")}`);
+    console.log("components:");
+    for (const [name, c] of Object.entries(COMPONENTS)) console.log(`  ${name.padEnd(16)} ${c.description}`);
     console.log(`themes: ${Object.keys(THEMES).join(", ")}`);
     console.log(`caption styles: ${Object.keys(CAPTION_STYLES).join(", ")}`);
+    console.log('full props: "reelforge schema -o project.schema.json"');
+  });
+
+program
+  .command("schema")
+  .description("write the project file JSON Schema, with every component's props")
+  .option("-o, --output <file>", "write to a file instead of stdout")
+  .action(async (opts) => {
+    const schema = zodToJsonSchema(projectSchemaWithComponents(), { name: "ReelforgeProject", $refStrategy: "none" });
+    const json = JSON.stringify(schema, null, 2);
+    if (opts.output) {
+      await writeFile(opts.output, json);
+      console.log(`wrote ${opts.output}`);
+    } else {
+      console.log(json);
+    }
   });
 
 program
@@ -340,10 +358,18 @@ program
   .description("validate a REELFORGE project file")
   .action(async (path) => {
     if (!existsSync(path)) throw new Error(`file not found: ${path}`);
-    const { issues } = validateProject(JSON.parse(await readFile(path, "utf8")));
+    const { project, issues } = validateProject(JSON.parse(await readFile(path, "utf8")));
     for (const i of issues) console.log(`${i.level.toUpperCase()} ${i.path}: ${i.message}`);
-    if (!issues.length) console.log("project is valid");
-    if (issues.some((i) => i.level === "error")) process.exitCode = 1;
+    // Component props are checked too, so an agent learns about mistakes before rendering.
+    let componentErrors: string[] = [];
+    try {
+      componentErrors = project ? validateComposition(project) : [];
+    } catch (e) {
+      componentErrors = [(e as Error).message];
+    }
+    for (const e of componentErrors) console.log(`ERROR ${e}`);
+    if (!issues.length && !componentErrors.length) console.log("project is valid");
+    if (issues.some((i) => i.level === "error") || componentErrors.length) process.exitCode = 1;
   });
 
 program.parseAsync().catch((err: Error) => {

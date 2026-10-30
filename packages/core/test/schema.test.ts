@@ -33,7 +33,7 @@ describe("validateProject", () => {
     expect(issues[0]).toMatchObject({ level: "error", path: "project.fps" });
   });
 
-  it("flags odd dimensions, duplicate ids, overlaps and unknown sources", () => {
+  it("flags odd dimensions, duplicate ids and unknown sources, but not layered scenes", () => {
     const { issues } = validateProject({
       ...blueprintExample,
       project: { ...blueprintExample.project, width: 1081 },
@@ -44,7 +44,6 @@ describe("validateProject", () => {
       "error:edit.sourceId",
       "error:project",
       "error:scenes.1.id",
-      "warning:scenes",
     ]);
   });
 });

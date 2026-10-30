@@ -20,6 +20,7 @@ the recorded-video workflow.
 | `@reelforge/motion` components: `kinetic-text`, `lower-third`, `network-diagram`, `counter`, `rect`, `backdrop`; themes `dark-tech`, `clean-pro` | Done |
 | `@reelforge/renderer` Chromium frame renderer, streamed into FFmpeg over footage or a background | Done |
 | CLI: `render`, `still`, `components` | Done |
+| Prompt-to-video: `browser-window`, `bar-chart`, `bullet-list` components; `reelforge schema` (JSON Schema for agents); strict prop validation; 30 s example | Done |
 | Audio clean-up: high-pass, denoise, noise-floor-driven expander, compression, loudness target with peak limiting; loudness and clipping checks | Done |
 | Audio enhancement (loudness normalisation, denoise) | Not started |
 
@@ -76,6 +77,27 @@ npm run demo -- path/to/video.mp4   # or uses yours
 The demo plans the recording, adds a diagram timed to the moment the speaker says "browser",
 renders preview stills, then renders and validates the Reel. Output goes to `out/demo/`. On this
 machine, a 26.6 s recording becomes a 13.6 s Reel in about 45 s end to end.
+
+## Prompt to video
+
+The coding agent acts as the director. It turns a prompt into a storyboard and writes a project file
+of scenes, and REELFORGE validates and renders it. No footage is needed.
+
+```bash
+npm run reelforge -- components                              # what each component does
+npm run reelforge -- schema -o project.schema.json           # full JSON Schema, every prop
+npm run reelforge -- project-validate examples/prompt-to-video/how-websites-load.json
+npm run reelforge -- still examples/prompt-to-video/how-websites-load.json --frame 600 -o check.png
+npm run reelforge -- render examples/prompt-to-video/how-websites-load.json -o how-websites-load.mp4
+```
+
+[`examples/prompt-to-video/how-websites-load.json`](examples/prompt-to-video/how-websites-load.json)
+is the blueprint's example prompt, built as a 30 s Reel with seven scenes: hook, browser, request
+journey, timing chart, total, tips, call to action. It renders in about 73 s on this machine.
+
+Scenes overlap freely; that's how layers work, with later scenes drawn on top. Component props are
+validated strictly, so a misspelt prop is an error that names it rather than something silently
+ignored.
 
 ## Audio clean-up
 

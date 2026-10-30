@@ -100,14 +100,8 @@ export function validateProject(input: unknown): { project?: Project; issues: Pr
     seen.add(scene.id);
   });
 
-  const ordered = [...project.scenes].sort((a, b) => a.startFrame - b.startFrame);
-  for (let i = 1; i < ordered.length; i++) {
-    const prev = ordered[i - 1]!;
-    const cur = ordered[i]!;
-    if (cur.startFrame < prev.startFrame + prev.durationFrames) {
-      issues.push({ level: "warning", path: "scenes", message: `scene "${cur.id}" overlaps "${prev.id}"` });
-    }
-  }
+  // Overlapping scenes are not flagged: they are how layers work (a full-length
+  // backdrop under every scene). Later scenes in the array draw on top.
 
   if (project.edit && !project.sources.some((s) => s.id === project.edit!.sourceId)) {
     issues.push({ level: "error", path: "edit.sourceId", message: `unknown source "${project.edit.sourceId}"` });
