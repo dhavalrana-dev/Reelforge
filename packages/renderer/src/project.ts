@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { writeFile, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, dirname, extname, isAbsolute, join, resolve } from "node:path";
@@ -15,6 +15,8 @@ import {
 } from "@reelforge/core";
 import {
   CAPTION_STYLES,
+  DEFAULT_AUDIO_CLEANUP,
+  renderMix,
   buildAssCaptions,
   defaultTools,
   probe,
@@ -113,6 +115,32 @@ export async function renderProject(projectFile: string, output: string, opts: R
   }
   const captionsFile = await writeCaptions(loaded, p, output);
 
+  // Narration, music and effects are mixed (with any footage dialogue) into
+  // one levelled track before the picture is rendered.
+  const tracks = project.audioTracks.map((t) => ({ path: loaded.path(t.path), role: t.role, start: t.startFrame / fps, gainDb: t.gainDb }));
+  for (const t of tracks) if (!existsSync(t.path)) throw new Error(`audio track not found: ${t.path}`);
+  const loudness = project.audio?.loudness ?? DEFAULT_AUDIO_CLEANUP.loudness;
+  const truePeak = project.audio?.truePeak ?? DEFAULT_AUDIO_CLEANUP.truePeak;
+  const mixDir = tracks.length ? mkdtempSync(join(tmpdir(), "reelforge-mix-")) : null;
+  let mixFile: string | undefined;
+  try {
+    if (mixDir) {
+      mixFile = join(mixDir, "mix.wav");
+      await renderMix({
+        tracks,
+        dialogue: p.footage?.hasAudio ? { input: p.footage.path, timeline: p.footage.timeline, cleanup: project.audio } : undefined,
+        duration: p.durationFrames / fps,
+        workDir: mixDir,
+        output: mixFile,
+        loudness,
+        truePeak,
+      });
+    }
+  } catch (e) {
+    if (mixDir) rmSync(mixDir, { recursive: true, force: true });
+    throw e;
+  }
+
   // Without footage, background-layer components render in their own
   // low-resolution pass first; the main pass then draws only the foreground.
   const layers = p.footage ? null : splitBackground(project);
@@ -164,15 +192,17 @@ export async function renderProject(projectFile: string, output: string, opts: R
         captionsFile,
         overlayFrames: frames(),
         audioCleanup: project.audio,
+        mixFile,
       });
     } else {
       const background = project.background ?? getTheme(project.theme).background;
-      await renderGraphics({ output, width, height, fps, durationFrames: p.durationFrames, background, overlayFrames: frames(), captionsFile, backgroundVideo });
+      await renderGraphics({ output, width, height, fps, durationFrames: p.durationFrames, background, overlayFrames: frames(), captionsFile, backgroundVideo, audioFile: mixFile });
     }
   } finally {
     await renderer.close();
     addStats(renderer.stats);
     if (stage) rmSync(stage, { recursive: true, force: true });
+    if (mixDir) rmSync(mixDir, { recursive: true, force: true });
   }
 
   const report = await validateOutput(output, {
@@ -180,8 +210,8 @@ export async function renderProject(projectFile: string, output: string, opts: R
     height,
     fps,
     duration: p.durationFrames / fps,
-    requireAudio: p.footage ? p.footage.hasAudio : true,
-    ...(p.footage?.hasAudio && project.audio ? { loudness: project.audio.loudness, truePeak: project.audio.truePeak } : {}),
+    requireAudio: p.footage ? p.footage.hasAudio || !!mixFile : true,
+    ...(mixFile || (p.footage?.hasAudio && project.audio) ? { loudness, truePeak } : {}),
   });
   return { durationFrames: p.durationFrames, stats, seconds: (Date.now() - started) / 1000, warnings: loaded.warnings, report };
 }

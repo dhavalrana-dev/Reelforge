@@ -204,3 +204,35 @@ export async function measureOutputLoudness(path: string, tools: Tools = default
   ]);
   return parseEbur128Summary(stderr);
 }
+
+/**
+ * Brings an audio file to a loudness target with make-up gain and a peak
+ * limiter (measure, apply, measure again, correct once), the same way
+ * edited dialogue is normalised. Writes 48 kHz 16-bit WAV.
+ */
+export async function normalizeAudioFile(
+  input: string,
+  output: string,
+  { loudness = DEFAULT_AUDIO_CLEANUP.loudness, truePeak = DEFAULT_AUDIO_CLEANUP.truePeak }: { loudness?: number; truePeak?: number } = {},
+  tools: Tools = defaultTools,
+): Promise<LoudnessReport> {
+  const o = { ...DEFAULT_AUDIO_CLEANUP, loudness, truePeak };
+  const measure = async (chain: string[]) => {
+    const { stderr } = await runOrThrow(tools.ffmpeg, ["-hide_banner", "-nostats", "-i", input, "-af", [...chain, "ebur128=peak=true"].join(","), "-f", "null", "-"]);
+    return parseEbur128Summary(stderr).integrated;
+  };
+  const clamp = (g: number) => Math.max(-MAX_GAIN_DB, Math.min(MAX_GAIN_DB, g));
+  let gainDb = 0;
+  const before = await measure(["anull"]);
+  if (Number.isFinite(before)) {
+    gainDb = clamp(o.loudness - before);
+    const after = await measure(gainStage(o, gainDb));
+    if (Number.isFinite(after)) gainDb = clamp(gainDb + (o.loudness - after));
+  }
+  await runOrThrow(tools.ffmpeg, [
+    "-hide_banner", "-nostats", "-y", "-i", input,
+    "-af", [...gainStage(o, gainDb), "aresample=48000"].join(","),
+    "-c:a", "pcm_s16le", output,
+  ]);
+  return measureOutputLoudness(output, tools);
+}

@@ -19,6 +19,8 @@ export interface RenderCutsOptions {
   overlayFrames?: AsyncIterable<Buffer>;
   /** Clean up and loudness-normalise the dialogue (two-pass). */
   audioCleanup?: AudioCleanupOptions;
+  /** A finished audio mix (see renderMix) used instead of the footage's audio. */
+  mixFile?: string;
 }
 
 export interface CutFilterOptions {
@@ -38,26 +40,20 @@ const STAGED_CAPTIONS = "captions.ass";
 
 const sec = (n: number) => n.toFixed(6);
 
-/**
- * How overlay frames reach the main ffmpeg. "raw": decoded to RGBA by
- * pngToRawRgba first, which cut-and-join graphs need (see there). "png":
- * piped straight in, which graphs without trim/concat state can take and
- * which is faster (measured: 22.5 s vs 31.5 s for a 30 s 1080x1920 explainer).
- */
-type OverlayFormat = "raw" | "png";
-
-/** Input that reads overlay frames from stdin at the project frame rate, starting at t=0. */
-const overlayInput = (format: OverlayFormat, fps: number, width: number, height: number) =>
-  format === "raw"
-    ? ["-f", "rawvideo", "-pix_fmt", "rgba", "-s", `${width}x${height}`, "-framerate", String(fps), "-i", "-"]
-    : ["-f", "image2pipe", "-framerate", String(fps), "-c:v", "png", "-i", "-"];
+/** Input that reads raw RGBA overlay frames from stdin at the project frame rate, starting at t=0. */
+const overlayInput = (fps: number, width: number, height: number) => [
+  "-f", "rawvideo", "-pix_fmt", "rgba", "-s", `${width}x${height}`, "-framerate", String(fps), "-i", "-",
+];
 
 /**
  * Chromium encodes fully opaque frames as RGB PNGs and everything else as
  * RGBA. A pixel-format change mid-stream makes ffmpeg rebuild the filter
- * graph, which resets trim/concat state and silently drops everything after
- * the next cut. Decoding in a separate trivial ffmpeg first gives the main
- * graph one fixed format.
+ * graph: with cuts it silently drops everything after the next cut, and
+ * without them the first frame after the switch can land a frame late
+ * (seen intermittently in the graphics-only alignment test, so it's timing-
+ * dependent). Decoding in a separate trivial ffmpeg first gives every main
+ * graph one fixed format. Piping PNGs straight in was ~30% faster for
+ * graphics-only renders, but not frame-exact, so every path decodes.
  */
 export function pngToRawRgba(frames: AsyncIterable<Buffer>, tools: Tools = defaultTools): AsyncGenerator<Buffer> {
   return pipeThrough(tools.ffmpeg, ["-hide_banner", "-v", "error", "-f", "image2pipe", "-c:v", "png", "-i", "-", "-f", "rawvideo", "-pix_fmt", "rgba", "-"], frames);
@@ -117,19 +113,13 @@ export function buildCutFilter({ timeline, width, height, hasAudio, captionsFile
 }
 
 /** Runs ffmpeg, staging the captions file and streaming overlay frames if present. */
-async function runFfmpeg(
-  args: string[],
-  captionsFile: string | undefined,
-  frames: AsyncIterable<Buffer> | undefined,
-  format: OverlayFormat,
-  tools: Tools,
-) {
+async function runFfmpeg(args: string[], captionsFile: string | undefined, frames: AsyncIterable<Buffer> | undefined, tools: Tools) {
   const stage = mkdtempSync(join(tmpdir(), "reelforge-render-"));
   try {
     if (captionsFile) copyFileSync(captionsFile, join(stage, STAGED_CAPTIONS));
     let result: RunResult;
     if (frames) {
-      result = await runWithInput(tools.ffmpeg, args, format === "raw" ? pngToRawRgba(frames, tools) : frames, { cwd: stage });
+      result = await runWithInput(tools.ffmpeg, args, pngToRawRgba(frames, tools), { cwd: stage });
       if (result.code !== 0) {
         throw new Error(`ffmpeg exited with code ${result.code}\n${result.stderr.trim().split("\n").slice(-8).join("\n")}`);
       }
@@ -148,22 +138,30 @@ export async function renderCuts(opts: RenderCutsOptions, tools: Tools = default
   }
   const overlay = !!opts.overlayFrames;
   let audioFilter: string | undefined;
-  if (opts.audioCleanup && opts.hasAudio) {
+  if (opts.audioCleanup && opts.hasAudio && !opts.mixFile) {
     const { profile, gainDb } = await analyzeAudio(resolve(opts.input), opts.timeline, opts.audioCleanup, tools);
     audioFilter = audioCleanupFilter(opts.audioCleanup, gainDb, profile);
   }
+  // A finished mix (already cut, cleaned and levelled) replaces the footage's own audio.
+  const mixInput = overlay ? 2 : 1;
+  const audioArgs = opts.mixFile
+    ? ["-map", `${mixInput}:a`, "-c:a", "aac", "-b:a", "192k"]
+    : opts.hasAudio
+      ? ["-map", "[aout]", "-c:a", "aac", "-b:a", "192k"]
+      : [];
   const args = [
     "-hide_banner", "-nostats", "-y",
     "-i", resolve(opts.input),
-    ...(overlay ? overlayInput("raw", opts.timeline.fps, opts.width, opts.height) : []),
-    "-filter_complex", buildCutFilter({ ...opts, overlay, audioFilter }),
+    ...(overlay ? overlayInput(opts.timeline.fps, opts.width, opts.height) : []),
+    ...(opts.mixFile ? ["-i", resolve(opts.mixFile)] : []),
+    "-filter_complex", buildCutFilter({ ...opts, hasAudio: opts.hasAudio && !opts.mixFile, overlay, audioFilter }),
     "-map", "[vout]",
-    ...(opts.hasAudio ? ["-map", "[aout]", "-c:a", "aac", "-b:a", "192k"] : []),
+    ...audioArgs,
     "-frames:v", String(opts.timeline.durationFrames),
     ...encodeArgs(opts.timeline.fps, opts.crf),
     resolve(opts.output),
   ];
-  await runFfmpeg(args, opts.captionsFile, opts.overlayFrames, "raw", tools);
+  await runFfmpeg(args, opts.captionsFile, opts.overlayFrames, tools);
 }
 
 export interface RenderGraphicsOptions {
@@ -182,6 +180,8 @@ export interface RenderGraphicsOptions {
    * the frame size and used instead of the flat colour.
    */
   backgroundVideo?: string;
+  /** A finished audio mix; without one the video gets a silent track. */
+  audioFile?: string;
 }
 
 export interface BackgroundPassOptions {
@@ -206,14 +206,14 @@ export async function renderBackgroundPass(opts: BackgroundPassOptions, tools: T
   const args = [
     "-hide_banner", "-nostats", "-y",
     "-f", "lavfi", "-i", `color=c=0x${opts.background.slice(1)}:s=${opts.width}x${opts.height}:r=${opts.fps}:d=${seconds}`,
-    ...overlayInput("png", opts.fps, opts.width, opts.height),
+    ...overlayInput(opts.fps, opts.width, opts.height),
     "-filter_complex", `[0:v][1:v]${OVERLAY},format=bgr0[vout]`,
     "-map", "[vout]",
     "-frames:v", String(opts.durationFrames),
     "-c:v", "ffv1", "-level", "3", "-g", "1",
     resolve(opts.output),
   ];
-  await runFfmpeg(args, undefined, opts.frames, "png", tools);
+  await runFfmpeg(args, undefined, opts.frames, tools);
 }
 
 /**
@@ -231,14 +231,14 @@ export async function renderGraphics(opts: RenderGraphicsOptions, tools: Tools =
   const args = [
     "-hide_banner", "-nostats", "-y",
     ...base,
-    ...overlayInput("png", opts.fps, opts.width, opts.height),
-    "-f", "lavfi", "-i", "anullsrc=r=48000:cl=stereo",
+    ...overlayInput(opts.fps, opts.width, opts.height),
+    ...(opts.audioFile ? ["-i", resolve(opts.audioFile)] : ["-f", "lavfi", "-i", "anullsrc=r=48000:cl=stereo"]),
     "-filter_complex", `${baseChain}[1:v]${video}[vout]`,
     "-map", "[vout]", "-map", "2:a",
-    "-c:a", "aac", "-b:a", "128k",
+    "-c:a", "aac", "-b:a", opts.audioFile ? "192k" : "128k",
     "-frames:v", String(opts.durationFrames), "-t", seconds,
     ...encodeArgs(opts.fps, opts.crf),
     resolve(opts.output),
   ];
-  await runFfmpeg(args, opts.captionsFile, opts.overlayFrames, "png", tools);
+  await runFfmpeg(args, opts.captionsFile, opts.overlayFrames, tools);
 }

@@ -6,3 +6,6 @@ out/
 .venv/
 __pycache__/
 *.pyc
+
+# Kokoro TTS model files (download: see README)
+workers/tts/models/

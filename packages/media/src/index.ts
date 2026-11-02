@@ -7,3 +7,5 @@ export * from "./doctor";
 export * from "./transcribe";
 export * from "./captions-ass";
 export * from "./audio";
+export * from "./mix";
+export * from "./narration";

@@ -1,3 +1,6 @@
+import { existsSync } from "node:fs";
+import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { defaultTools, run, type Tools } from "./exec";
 import { findWorkerPython } from "./transcribe";
 
@@ -59,6 +62,19 @@ export async function runDoctor(tools: Tools = defaultTools): Promise<DoctorChec
       whisper?.code === 0
         ? `faster-whisper ${whisper.stdout.trim()} (${python})`
         : "faster-whisper not found; install workers/transcribe/requirements.txt to enable captions",
+  });
+  const ttsModels = process.env.REELFORGE_TTS_MODELS ?? fileURLToPath(new URL("../../../workers/tts/models/", import.meta.url));
+  const kokoro = await run(python, ["-c", "import kokoro_onnx"]).catch(() => null);
+  const modelsPresent = existsSync(join(ttsModels, "kokoro-v1.0.onnx")) && existsSync(join(ttsModels, "voices-v1.0.bin"));
+  checks.push({
+    name: "Narration",
+    status: kokoro?.code === 0 && modelsPresent ? "ok" : "warn",
+    detail:
+      kokoro?.code !== 0
+        ? "kokoro-onnx not found; install workers/tts/requirements.txt to enable narrate"
+        : modelsPresent
+          ? "Kokoro TTS ready"
+          : `Kokoro model files missing in ${ttsModels} (see README)`,
   });
   return checks;
 }

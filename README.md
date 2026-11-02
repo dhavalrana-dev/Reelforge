@@ -23,6 +23,9 @@ the recorded-video workflow.
 | Optional generative backend: Freefield adapter, `reelforge gen apps/info/run`, licence and likeness policy, provenance records | Done (tested against a stand-in server) |
 | Prompt-to-video: `browser-window`, `bar-chart`, `bullet-list` components; `reelforge schema` (JSON Schema for agents); strict prop validation; 30 s example | Done |
 | Readability check: every on-screen text visible long enough to read (`project-validate`, `plan`, `render`); planner sizes scenes by it | Done |
+| Narration and script-to-video: Kokoro TTS with a speech-recognition check of every line, `reelforge narrate`, `voices` | Done |
+| Audio tracks: voice, music and effects mixed with ducking and a loudness target; procedural `music` and `sfx` | Done |
+| Final-file check for black stretches (1 s or more) | Done |
 | Audio clean-up: high-pass, denoise, noise-floor-driven expander, compression, loudness target with peak limiting; loudness and clipping checks | Done |
 | Audio enhancement (loudness normalisation, denoise) | Not started |
 
@@ -51,7 +54,8 @@ npm run reelforge -- edit recording.mp4 -o reel.mp4 --remove-silence --captions 
 `edit` never touches the source. It writes the MP4, plus a `.edl.json` edit decision list
 (detected silences, the resolved timeline and the caption pages) next to it, and then validates the export.
 With `--captions` it also keeps the source-time `.transcript.json` and the `.captions.ass` file. Pass
-`--transcript` to re-cut or restyle without transcribing again. The checks cover resolution, frame rate, duration, A/V length, and a full decode.
+`--transcript` to re-cut or restyle without transcribing again. The checks cover resolution, frame rate, duration, A/V length, a full decode, clipping, and black
+stretches of a second or more.
 
 ## Plan, review, render
 
@@ -95,7 +99,7 @@ npm run reelforge -- render examples/prompt-to-video/how-websites-load.json -o h
 
 [`examples/prompt-to-video/how-websites-load.json`](examples/prompt-to-video/how-websites-load.json)
 is the blueprint's example prompt, built as a 30 s Reel with seven scenes: hook, browser, request
-journey, timing chart, total, tips, call to action. It renders in about 36 s on this machine.
+journey, timing chart, total, tips, call to action. It renders in about 45 s on this machine.
 
 **Readability.** `project-validate`, `plan` and `render` warn when on-screen text isn't fully visible
 long enough to read. Each component reports its texts and the frame each one settles, using the same
@@ -146,6 +150,51 @@ Safeguards:
 On an 8 GB GPU like this machine's, the small apps run locally: background removal (about 0.4 GB),
 depth maps, frame smoothing, and upscaling (about 4 GB). Video generation needs 15–44 GB, which in
 practice means Modal.
+
+## Narration, music and sound effects
+
+**Script to video** (blueprint workflow C):
+
+```bash
+npm run reelforge -- narrate script.txt -o vo.json --voice af_heart --music calm
+npm run reelforge -- render vo.json -o vo.mp4
+npm run demo:voiceover        # the full example: narration, a visual per line, whooshes
+```
+
+Each line of `script.txt` is spoken by [Kokoro](https://github.com/thewh1teagle/kokoro-onnx), which runs
+locally and offline. faster-whisper then transcribes every line back and compares it with the script;
+a line heard differently is reported, so a misread name or number doesn't slip through. Lines are laid
+end to end on frames, and `narrate` writes:
+
+- the project (backdrop, captions, a voice track per line, an optional music bed);
+- the transcript, with word times from what was actually heard, in output time;
+- `<name>.lines.json`, each line's start and end frame, for placing scenes against the narration.
+
+`reelforge voices` lists the 54 voices. A JSON script can set `voice` per line, and `asr` when
+recognition should expect a different spelling (names, numbers).
+
+**Audio tracks.** Any project can list `audioTracks`, each with `path`, `role` (`voice`, `music` or
+`sfx`), `startFrame` and `gainDb`. At render they're mixed with the footage dialogue, if there is any.
+Music is ducked under voice and dialogue by a sidechain compressor (about 15 dB while someone speaks,
+measured; it swells back between sentences). The mix is then brought to the loudness target (-14 LUFS
+by default) with a peak limiter, and the export is checked against it.
+
+**Music and effects made in code.** `reelforge music -o bed.wav --seconds 30 --mood calm|upbeat|tense`
+and `reelforge sfx whoosh|pop|tick|rise -o fx.wav` synthesise audio from code, with no samples, so the
+output carries no third-party licence. Both are deterministic for a given seed.
+
+Setup, in the same Python environment as transcription:
+
+```bash
+workers/transcribe/.venv/Scripts/python -m pip install -r workers/tts/requirements.txt
+# model files into workers/tts/models/ (or set REELFORGE_TTS_MODELS)
+curl -L -o workers/tts/models/kokoro-v1.0.onnx https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0/kokoro-v1.0.onnx
+curl -L -o workers/tts/models/voices-v1.0.bin https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0/voices-v1.0.bin
+```
+
+Licences: the Kokoro-82M weights are Apache-2.0 and kokoro-onnx is MIT. Its phonemizer uses espeak-ng,
+which is GPL-3.0. That's fine locally, but bundling it in the commercial installer needs the same
+review as the GPL FFmpeg build. `reelforge doctor` reports whether narration is ready.
 
 ## Audio clean-up
 
@@ -232,17 +281,17 @@ painted once and reused.
 - Rendering uses the system Edge or Chrome unless `REELFORGE_CHROMIUM` is set. The installer should
   ship a pinned Chromium (plus licensed fonts) so frames are identical on every machine.
 - Rendering speed on this machine (1080x1920, 4 workers): the 30 s prompt-to-video example renders
-  in about 36 s (25 fps), down from 73 s. Each worker is a separate browser process, because pages
-  inside one browser share a capture pipeline. What was measured, and the two changes that came out
-  of it:
+  in about 45 s (20 fps), down from 73 s. Each worker is a separate browser process, because pages
+  inside one browser share a capture pipeline. What was measured, and what came out of it:
   - A full-frame dithered gradient was the bottleneck: 23 fps and 1.5 MB per PNG, against 114 fps
     for all the foreground graphics together. Background-layer components (`backdrop`) now render
     in their own pass at quarter size into a lossless intermediate, which the main encode scales up
     beneath the foreground. Drawing small and scaling up with CSS doesn't help, because Chromium
     rasterises and encodes at the final size. This applies to videos without footage.
-  - Graphics-only renders pipe PNGs straight into FFmpeg (22.5 s against 31.5 s through the RGBA
-    decode stage). Renders over footage keep the decode stage, because their cut graph can't
-    survive a mid-stream format change.
+  - Piping PNGs straight into FFmpeg for graphics-only renders was about 30% faster, and is not
+    used: Chromium switches between RGB and RGBA PNGs, and the graph rebuild that triggers sometimes
+    lands the first opaque frame a frame late. The frame-alignment test caught it intermittently.
+    Every render decodes to RGBA in a separate stage first.
   - With footage, the H.264 encode competes with the browsers for CPU. That's the remaining cost
     (rendering alone runs at about 85 fps for this example's foreground).
 - `still` doesn't draw captions yet.

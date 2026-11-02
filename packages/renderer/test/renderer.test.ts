@@ -98,7 +98,7 @@ describe.skipIf(!browserAvailable)("frame renderer (Chromium)", () => {
       JSON.stringify({
         schemaVersion: "1.0",
         project: { name: "align", width: 540, height: 960, fps: 30 },
-        background: "#000000",
+        background: "#303030", // dark grey, not black: a black first second would (rightly) fail "no black stretches"
         scenes: [{ id: "red", startFrame: 30, durationFrames: 30, transition: "cut", components: [{ type: "rect", x: 0, y: 0, w: 100, h: 100, color: "#FF0000" }] }],
       }),
     );

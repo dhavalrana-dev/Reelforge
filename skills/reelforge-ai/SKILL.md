@@ -41,6 +41,18 @@ When the user describes a video instead of supplying footage:
 
 Keep on-screen text short (under about 8 words per line) and use the `highlight` options for the key word.
 
+## Script or voiceover to video
+
+When the user gives a script or asks for a narrated video:
+
+1. Write the script as one short spoken line per line of `script.txt`: one idea each, about 8–15 words.
+2. Run `reelforge narrate script.txt -o <project.json> [--voice af_heart] [--music calm|upbeat|tense|none]`. If it warns that a line was heard differently, tell the user, then rephrase that line or give it an `asr` field in a JSON script.
+3. Read `<project>.lines.json` and add one visual scene per line: start it at the line's `startFrame` and hold it until the next line starts. Captions already show the spoken words, so don't repeat them as on-screen text.
+4. For a sound effect on a scene change, run `reelforge sfx whoosh -o whoosh.wav` and add it to `audioTracks` with `"role": "sfx"`, about 10 frames before the scene starts, at `"gainDb": -10`.
+5. Validate, fix readability warnings, check stills, then render, as in Prompt to video.
+
+To add music to any project, run `reelforge music -o bed.wav --seconds <length> --mood calm`, then add it to `audioTracks` with `"role": "music"` and `"gainDb": -12`. It ducks under voice and dialogue automatically.
+
 ## Generative apps (optional)
 
 Only when `reelforge doctor` reports a generative backend as OK:

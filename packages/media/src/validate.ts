@@ -71,5 +71,30 @@ export async function validateOutput(path: string, expect: OutputExpectations = 
   const errors = decode.stderr.trim();
   add("full decode", decode.code === 0 && !errors, errors ? errors.split("\n").slice(0, 3).join(" | ") : "clean");
 
+  if (v) {
+    const black = await detectBlack(path, tools);
+    add(
+      "no black stretches",
+      black.length === 0,
+      black.length ? black.map((b) => `${b.start.toFixed(2)}-${b.end.toFixed(2)}s`).join(", ") : `none of ${BLACK_MIN_SECONDS}s or longer`,
+    );
+  }
+
   return { ok: checks.every((c) => c.ok), checks, info };
+}
+
+/** Shortest near-black stretch reported: a dip to black in a transition is fine, a second of it is dead air. */
+const BLACK_MIN_SECONDS = 1;
+
+/**
+ * Near-black stretches: 98% of pixels at or below 5% luma. Dark themes pass
+ * as long as anything (a glow, text) is on screen, which is the point: a
+ * full-frame near-black second means nothing is being shown.
+ */
+export async function detectBlack(path: string, tools: Tools = defaultTools): Promise<{ start: number; end: number }[]> {
+  const { stderr } = await run(tools.ffmpeg, [
+    "-hide_banner", "-nostats", "-i", path, "-an",
+    "-vf", `blackdetect=d=${BLACK_MIN_SECONDS}:pix_th=0.05:pic_th=0.98`, "-f", "null", "-",
+  ]);
+  return [...stderr.matchAll(/black_start:\s*([\d.]+)\s+black_end:\s*([\d.]+)/g)].map((m) => ({ start: Number(m[1]), end: Number(m[2]) }));
 }

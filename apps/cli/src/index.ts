@@ -30,10 +30,15 @@ import {
   transcribe,
   validateOutput,
   type CaptionStyleName,
+  listVoices,
+  synthMusic,
+  synthSfx,
+  type MusicMood,
+  type SfxKind,
 } from "@reelforge/media";
 import { COMPONENTS, THEMES, checkReadability, describeReadabilityIssue, projectSchemaWithComponents, validateComposition } from "@reelforge/motion";
 import { zodToJsonSchema } from "zod-to-json-schema";
-import { planRecording, renderProject, renderStill } from "@reelforge/renderer";
+import { narrateScript, planRecording, readScript, renderProject, renderStill } from "@reelforge/renderer";
 import { checkPolicy, configuredProvider, generate, isPermissive, type GenerativeProvider, type GenerativeValue } from "@reelforge/generative";
 
 const program = new Command();
@@ -381,6 +386,73 @@ program
     for (const r of readability) console.log(`WARNING readability: ${describeReadabilityIssue(r)}`);
     if (!issues.length && !componentErrors.length && !readability.length) console.log("project is valid");
     if (issues.some((i) => i.level === "error") || componentErrors.length) process.exitCode = 1;
+  });
+
+program
+  .command("narrate <script>")
+  .description("script or voiceover to video: speak a script (one line per line, or JSON) into a timed project")
+  .requiredOption("-o, --output <project.json>", "project file to write")
+  .option("--voice <name>", "Kokoro voice (see: reelforge voices)", "af_heart")
+  .option("--speed <n>", "speaking speed", "1")
+  .option("--format <ratio>", "9:16 | 16:9 | 1:1", "9:16")
+  .option("--fps <fps>", "output frame rate", "30")
+  .option("--theme <name>", Object.keys(THEMES).join(" | "), "dark-tech")
+  .option("--caption-style <name>", `${Object.keys(CAPTION_STYLES).join(" | ")} | none`, "bold-creator")
+  .option("--music <mood>", "calm | upbeat | tense | none", "calm")
+  .option("--no-verify", "skip checking every line with speech recognition")
+  .action(async (scriptFile, opts) => {
+    const music = opts.music === "none" ? null : (opts.music as MusicMood);
+    if (music && !["calm", "upbeat", "tense"].includes(music)) throw new Error("--music must be calm, upbeat, tense or none");
+    const result = await narrateScript(await readScript(scriptFile), opts.output, {
+      voice: opts.voice,
+      speed: Number(opts.speed),
+      format: parseFormat(opts.format),
+      fps: Number(opts.fps),
+      theme: opts.theme,
+      captions: opts.captionStyle === "none" ? null : parseCaptionStyle(opts.captionStyle),
+      music,
+      verify: opts.verify,
+      onProgress: (l) => console.log(`  ${l}`),
+    });
+    for (const m of result.mismatches) {
+      console.log(`warning: line ${m.id} was heard as "${m.heard}" (${Math.round(m.similarity * 100)}% match). Listen to it; rephrase the line, or add an "asr" field with what should be heard`);
+    }
+    const fps = Number(opts.fps);
+    console.log(`${result.lines.length} lines, ${(result.durationFrames / fps).toFixed(1)}s`);
+    console.log(`wrote ${result.projectFile} and ${result.linesFile} (each line's start and end frame, for placing scenes)`);
+    console.log(`next: add scenes timed to the lines, "reelforge project-validate", then "reelforge render ${opts.output} -o out.mp4"`);
+  });
+
+program
+  .command("voices")
+  .description("list the narration voices")
+  .action(async () => {
+    const voices = await listVoices();
+    console.log(voices.join(", "));
+    console.log("a = American, b = British; f = female, m = male (e.g. af_heart, am_michael, bf_emma)");
+  });
+
+program
+  .command("music")
+  .description("generate a music bed in code (no samples, no third-party licence)")
+  .requiredOption("-o, --output <file.wav>", "output WAV")
+  .requiredOption("--seconds <n>", "length")
+  .option("--mood <mood>", "calm | upbeat | tense", "calm")
+  .option("--seed <n>", "variation", "1")
+  .action(async (opts) => {
+    if (!["calm", "upbeat", "tense"].includes(opts.mood)) throw new Error("--mood must be calm, upbeat or tense");
+    await synthMusic(opts.output, Number(opts.seconds), opts.mood as MusicMood, Number(opts.seed));
+    console.log(`wrote ${opts.output}; add it to a project as an audioTracks entry with "role": "music"`);
+  });
+
+program
+  .command("sfx <kind>")
+  .description("generate a sound effect in code: whoosh | pop | tick | rise")
+  .requiredOption("-o, --output <file.wav>", "output WAV")
+  .action(async (kind, opts) => {
+    if (!["whoosh", "pop", "tick", "rise"].includes(kind)) throw new Error("sound must be whoosh, pop, tick or rise");
+    await synthSfx(kind as SfxKind, opts.output);
+    console.log(`wrote ${opts.output}; add it as an audioTracks entry with "role": "sfx" and a startFrame`);
   });
 
 function requireProvider(): GenerativeProvider {

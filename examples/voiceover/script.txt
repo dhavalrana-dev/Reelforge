@@ -1,0 +1,5 @@
+What really happens when you open a website?
+First, your browser asks a DNS server where the site lives.
+Then it connects to that server and requests the page.
+The server gathers the data and sends it back.
+And your browser paints it on screen, all in under a second.

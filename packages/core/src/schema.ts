@@ -57,6 +57,24 @@ export const ProjectSchema = z.object({
       expand: z.boolean().default(true),
     })
     .optional(),
+  /**
+   * Extra audio mixed into the video: narration lines, a music bed, sound
+   * effects. Music is ducked under voice (and under footage dialogue), and
+   * the mix is brought to the loudness target.
+   */
+  audioTracks: z
+    .array(
+      z.object({
+        /** Audio file, relative to the project file. */
+        path: z.string().min(1),
+        role: z.enum(["voice", "music", "sfx"]),
+        /** Output frame the track starts at. */
+        startFrame: z.number().int().min(0).default(0),
+        /** Level change in dB before mixing. */
+        gainDb: z.number().min(-60).max(24).default(0),
+      }),
+    )
+    .default([]),
   captions: z
     .object({
       /** Transcript JSON (source time), relative to the project file. */
