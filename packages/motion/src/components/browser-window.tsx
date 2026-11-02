@@ -1,6 +1,6 @@
 import { easing, mapRange, spring } from "@reelforge/core";
 import { z } from "zod";
-import { clamp01, type FrameContext } from "../context";
+import { clamp01, type FrameContext, type TextItem } from "../context";
 
 export const BrowserWindowProps = z.object({
   url: z.string().min(1),
@@ -13,6 +13,17 @@ export const BrowserWindowProps = z.object({
   delay: z.number().int().min(0).default(0),
 });
 
+/** Frame the URL starts typing. */
+const TYPE_START = 10;
+/** Frames each page block takes to fade in. */
+const BLOCK_FADE_FRAMES = 8;
+
+/** When loading starts and when the page starts appearing, in component frames. */
+function browserTimeline(p: z.output<typeof BrowserWindowProps>) {
+  const loadStart = TYPE_START + Math.ceil(p.url.length * p.typeSpeed) + 6;
+  return { loadStart, pageStart: loadStart + p.loadFrames - 6 };
+}
+
 /**
  * Browser mock-up: the window springs in, the URL types itself, a loading
  * bar runs, then the page's skeleton blocks fade in from top to bottom.
@@ -23,12 +34,11 @@ export function BrowserWindow({ ctx, ...raw }: z.input<typeof BrowserWindowProps
   const frame = ctx.frame - p.delay;
 
   const enter = spring(frame, fps, { damping: 15, stiffness: 160 });
-  const typeStart = 10;
+  const typeStart = TYPE_START;
+  const { loadStart, pageStart } = browserTimeline(p);
   const typed = Math.max(0, Math.min(p.url.length, Math.floor((frame - typeStart) / p.typeSpeed)));
-  const loadStart = typeStart + Math.ceil(p.url.length * p.typeSpeed) + 6;
   const load = mapRange(frame, [loadStart, loadStart + p.loadFrames], [0, 1], { easing: easing.inOutCubic });
-  const pageStart = loadStart + p.loadFrames - 6;
-  const block = (i: number) => clamp01((frame - pageStart - i * 4) / 8);
+  const block = (i: number) => clamp01((frame - pageStart - i * 4) / BLOCK_FADE_FRAMES);
   const cursorOn = typed < p.url.length ? true : Math.floor(frame / 12) % 2 === 0 && load === 0;
 
   const w = ctx.portrait ? 84 : 60;
@@ -88,4 +98,10 @@ export function BrowserWindow({ ctx, ...raw }: z.input<typeof BrowserWindowProps
       </div>
     </div>
   );
+}
+
+export function browserWindowTexts(p: z.output<typeof BrowserWindowProps>): TextItem[] {
+  const items: TextItem[] = [{ id: "url", text: p.url, from: p.delay + TYPE_START + Math.ceil(p.url.length * p.typeSpeed) }];
+  if (p.headline) items.push({ id: "headline", text: p.headline, from: p.delay + browserTimeline(p).pageStart + BLOCK_FADE_FRAMES });
+  return items;
 }

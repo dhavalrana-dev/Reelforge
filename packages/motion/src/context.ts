@@ -15,6 +15,16 @@ export interface FrameContext {
   theme: Theme;
 }
 
+/**
+ * A piece of on-screen text and the scene-local frame from which it is fully
+ * visible and settled. Components report these for the readability check.
+ */
+export interface TextItem {
+  id: string;
+  text: string;
+  from: number;
+}
+
 /** Deterministic pseudo-random number in [0, 1) for a seed, for effects that need variation. */
 export function seeded(seed: number): number {
   let t = (seed + 0x6d2b79f5) | 0;

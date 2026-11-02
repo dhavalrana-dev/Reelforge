@@ -1,7 +1,7 @@
 import { easing, mapRange, spring } from "@reelforge/core";
 import type { CSSProperties } from "react";
 import { z } from "zod";
-import { clamp01, slotY, type FrameContext } from "../context";
+import { clamp01, slotY, type FrameContext, type TextItem } from "../context";
 
 export const KineticTextProps = z.object({
   text: z.string().min(1),
@@ -16,6 +16,13 @@ export const KineticTextProps = z.object({
   stagger: z.number().int().min(0).default(3),
   delay: z.number().int().min(0).default(0),
 });
+
+/** Frames each word takes to fade in (word-reveal). */
+const WORD_FADE_FRAMES = 5;
+/** Frames the whole line takes to fade up. */
+const FADE_UP_FRAMES = 14;
+/** Frames per typed character (typewriter). */
+const FRAMES_PER_CHAR = 2;
 
 const norm = (w: string) => w.toLowerCase().replace(/[^\p{L}\p{N}]/gu, "");
 
@@ -43,7 +50,7 @@ export function KineticText({ ctx, ...raw }: z.input<typeof KineticTextProps> & 
   const color = (w: string) => (highlight.has(norm(w)) ? theme.accent : theme.text);
 
   if (p.animation === "typewriter") {
-    const chars = Math.max(0, Math.floor(frame / 2));
+    const chars = Math.max(0, Math.floor(frame / FRAMES_PER_CHAR));
     const shown = p.text.slice(0, chars);
     const cursorOn = Math.floor(frame / 15) % 2 === 0 || chars < p.text.length;
     return (
@@ -55,7 +62,7 @@ export function KineticText({ ctx, ...raw }: z.input<typeof KineticTextProps> & 
   }
 
   if (p.animation === "fade-up") {
-    const t = mapRange(frame, [0, 14], [0, 1], { easing: easing.outCubic });
+    const t = mapRange(frame, [0, FADE_UP_FRAMES], [0, 1], { easing: easing.outCubic });
     return (
       <div style={{ ...box, opacity: t, transform: `translateY(calc(-50% + ${(1 - t) * 3 * u}px))` }}>
         {words.map((w, i) => (
@@ -79,7 +86,7 @@ export function KineticText({ ctx, ...raw }: z.input<typeof KineticTextProps> & 
               display: "inline-block",
               marginRight: "0.25em",
               color: color(w),
-              opacity: clamp01(local / 5),
+              opacity: clamp01(local / WORD_FADE_FRAMES),
               transform: `translateY(${(1 - rise) * 4 * u}px) scale(${0.92 + 0.08 * rise})`,
             }}
           >
@@ -89,4 +96,15 @@ export function KineticText({ ctx, ...raw }: z.input<typeof KineticTextProps> & 
       })}
     </div>
   );
+}
+
+export function kineticTextTexts(p: z.output<typeof KineticTextProps>): TextItem[] {
+  const words = p.text.split(/\s+/).length;
+  const settle =
+    p.animation === "typewriter"
+      ? p.text.length * FRAMES_PER_CHAR
+      : p.animation === "fade-up"
+        ? FADE_UP_FRAMES
+        : (words - 1) * p.stagger + WORD_FADE_FRAMES;
+  return [{ id: "text", text: p.text, from: p.delay + settle }];
 }

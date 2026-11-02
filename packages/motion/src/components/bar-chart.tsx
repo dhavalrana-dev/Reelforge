@@ -1,6 +1,6 @@
 import { easing, mapRange } from "@reelforge/core";
 import { z } from "zod";
-import { clamp01, type FrameContext } from "../context";
+import { clamp01, type FrameContext, type TextItem } from "../context";
 import { formatNumber } from "./counter";
 
 export const BarChartProps = z.object({
@@ -16,21 +16,26 @@ export const BarChartProps = z.object({
   delay: z.number().int().min(0).default(0),
 });
 
+const TITLE_IN_FRAMES = 12;
+/** Frames a bar takes to grow to its value. */
+const BAR_GROW_FRAMES = 24;
+const firstBar = (p: { title?: string }) => (p.title ? 8 : 0);
+
 /** Horizontal bars that grow in sequence, each with its value counting up. */
 export function BarChart({ ctx, ...raw }: z.input<typeof BarChartProps> & { ctx: FrameContext }) {
   const p = BarChartProps.parse(raw);
   const { u, theme } = ctx;
   const frame = ctx.frame - p.delay;
   const max = p.max ?? Math.max(...p.bars.map((b) => b.value), 1e-9);
-  const titleIn = mapRange(frame, [0, 12], [0, 1], { easing: easing.outCubic });
-  const first = p.title ? 8 : 0;
+  const titleIn = mapRange(frame, [0, TITLE_IN_FRAMES], [0, 1], { easing: easing.outCubic });
+  const first = firstBar(p);
 
   return (
     <div style={{ position: "absolute", left: "8%", right: "8%", top: ctx.portrait ? "20%" : "16%", fontFamily: theme.font, color: theme.text }}>
       {p.title && <div style={{ fontSize: 6 * u, fontWeight: 800, marginBottom: 4 * u, opacity: titleIn }}>{p.title}</div>}
       {p.bars.map((bar, i) => {
         const local = frame - first - i * p.stagger;
-        const grow = mapRange(local, [0, 24], [0, 1], { easing: easing.outCubic });
+        const grow = mapRange(local, [0, BAR_GROW_FRAMES], [0, 1], { easing: easing.outCubic });
         const color = p.highlight === undefined || p.highlight === i ? theme.accent : theme.accent2;
         return (
           <div key={i} style={{ marginBottom: 3 * u, opacity: clamp01(local / 5) }}>
@@ -49,4 +54,16 @@ export function BarChart({ ctx, ...raw }: z.input<typeof BarChartProps> & { ctx:
       })}
     </div>
   );
+}
+
+export function barChartTexts(p: z.output<typeof BarChartProps>): TextItem[] {
+  const items: TextItem[] = p.title ? [{ id: "title", text: p.title, from: p.delay + TITLE_IN_FRAMES }] : [];
+  p.bars.forEach((bar, i) =>
+    items.push({
+      id: `bar-${i}`,
+      text: `${bar.label} ${formatNumber(bar.value, p.decimals)}${p.unit}`,
+      from: p.delay + firstBar(p) + i * p.stagger + BAR_GROW_FRAMES,
+    }),
+  );
+  return items;
 }

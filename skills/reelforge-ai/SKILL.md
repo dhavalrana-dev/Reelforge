@@ -35,7 +35,7 @@ When the user describes a video instead of supplying footage:
 1. Write a short storyboard first: one line per scene with its purpose, the component, and its length in seconds. At 30 fps, frames = seconds × 30. A 30 s Reel is about 6–8 scenes, and each needs time to read: 3–7 s.
 2. Get the exact props with `reelforge schema -o project.schema.json`. `examples/prompt-to-video/how-websites-load.json` is a complete 30 s example to start from.
 3. Write the project. Put a full-length `backdrop` scene first, then the content scenes; scenes listed later draw on top. Use `"transition": "cut"` only when a hard cut is intended.
-4. Run `reelforge project-validate <project.json>` and fix every error it names.
+4. Run `reelforge project-validate <project.json>` and fix every error it names. Fix every `readability` warning too: lengthen the scene by the frames it says, shorten the text, or reduce `delay` or `stagger`, then validate again.
 5. Render a still from the middle of each scene and view them. Check that text is readable and nothing collides. In portrait, keep content above 68% of the height when captions will be added.
 6. Run `reelforge render <project.json> -o <out.mp4>` and report the checks.
 

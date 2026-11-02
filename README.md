@@ -22,6 +22,7 @@ the recorded-video workflow.
 | CLI: `render`, `still`, `components` | Done |
 | Optional generative backend: Freefield adapter, `reelforge gen apps/info/run`, licence and likeness policy, provenance records | Done (tested against a stand-in server) |
 | Prompt-to-video: `browser-window`, `bar-chart`, `bullet-list` components; `reelforge schema` (JSON Schema for agents); strict prop validation; 30 s example | Done |
+| Readability check: every on-screen text visible long enough to read (`project-validate`, `plan`, `render`); planner sizes scenes by it | Done |
 | Audio clean-up: high-pass, denoise, noise-floor-driven expander, compression, loudness target with peak limiting; loudness and clipping checks | Done |
 | Audio enhancement (loudness normalisation, denoise) | Not started |
 
@@ -95,6 +96,15 @@ npm run reelforge -- render examples/prompt-to-video/how-websites-load.json -o h
 [`examples/prompt-to-video/how-websites-load.json`](examples/prompt-to-video/how-websites-load.json)
 is the blueprint's example prompt, built as a 30 s Reel with seven scenes: hook, browser, request
 journey, timing chart, total, tips, call to action. It renders in about 36 s on this machine.
+
+**Readability.** `project-validate`, `plan` and `render` warn when on-screen text isn't fully visible
+long enough to read. Each component reports its texts and the frame each one settles, using the same
+timing constants as its animation, and tests check that the two agree. The rule follows common
+subtitle guidance: 15 characters a second for Latin script, 4.5 for Chinese, Japanese and Korean,
+plus 1 s to find the text, and at least 1.5 s. A fading scene's fade-out doesn't count as reading
+time. The planner sizes its title and name-strap scenes by this rule, and each warning says how many
+frames short the text is. Burned-in captions follow speech and aren't checked. The idea comes from
+lemo-opuscar's `readcheck`.
 
 Scenes overlap freely; that's how layers work, with later scenes drawn on top. Component props are
 validated strictly, so a misspelt prop is an error that names it rather than something silently

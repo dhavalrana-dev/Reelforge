@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { validateProject } from "@reelforge/core";
 import { defaultTools, run, runOrThrow } from "@reelforge/media";
+import { checkReadability, minSceneFrames } from "@reelforge/motion";
 import { planRecording } from "../src";
 
 const ffmpegAvailable = await run(defaultTools.ffmpeg, ["-version"]).then((r) => r.code === 0, () => false);
@@ -52,8 +53,17 @@ describe.skipIf(!ffmpegAvailable)("planRecording", () => {
       expect(Math.abs(r.end * 30 - Math.round(r.end * 30))).toBeLessThan(1e-6);
     }
     expect(project!.audio).toMatchObject({ loudness: -16, denoise: "light" });
-    expect(project!.scenes.map((s) => [s.id, s.startFrame])).toEqual([["title", 0], ["lower-third", 75]]);
-    expect(project!.scenes[1]!.startFrame + project!.scenes[1]!.durationFrames).toBeLessThanOrEqual(Math.round(result.outputDuration * 30));
+    // Starter scenes are sized to be readable: the title exactly, then the strap
+    // right after it. This 4 s clip is too short for the strap, so it is cut at
+    // the end of the video and the planner says so.
+    const [title, strap] = project!.scenes;
+    const end = Math.round(result.outputDuration * 30);
+    expect(title!.startFrame).toBe(0);
+    expect(title!.durationFrames).toBe(minSceneFrames(title!, 30));
+    expect(strap!.startFrame).toBe(title!.durationFrames);
+    expect(strap!.startFrame + strap!.durationFrames).toBe(end);
+    expect(checkReadability(project!).issues.map((i) => i.scene)).toEqual(["lower-third"]);
+    expect(result.warnings).toEqual([expect.stringMatching(/^readability: scene "lower-third"/)]);
   });
 
   it("refuses a recording without video", async () => {

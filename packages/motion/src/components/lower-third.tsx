@@ -1,12 +1,15 @@
 import { easing, mapRange, spring } from "@reelforge/core";
 import { z } from "zod";
-import type { FrameContext } from "../context";
+import type { FrameContext, TextItem } from "../context";
 
 export const LowerThirdProps = z.object({
   title: z.string().min(1),
   subtitle: z.string().optional(),
   delay: z.number().int().min(0).default(0),
 });
+
+/** Frames over which the title and subtitle fade in. */
+const TEXT_IN: [number, number] = [10, 22];
 
 /** Name strap: accent bar springs in, panel wipes open behind it, text follows. */
 export function LowerThird({ ctx, ...raw }: z.input<typeof LowerThirdProps> & { ctx: FrameContext }) {
@@ -15,7 +18,7 @@ export function LowerThird({ ctx, ...raw }: z.input<typeof LowerThirdProps> & { 
   const frame = ctx.frame - p.delay;
   const bar = spring(frame, fps, { damping: 16, stiffness: 180 });
   const wipe = mapRange(frame, [4, 18], [100, 0], { easing: easing.outCubic });
-  const text = mapRange(frame, [10, 22], [0, 1], { easing: easing.outCubic });
+  const text = mapRange(frame, TEXT_IN, [0, 1], { easing: easing.outCubic });
 
   return (
     <div
@@ -44,4 +47,8 @@ export function LowerThird({ ctx, ...raw }: z.input<typeof LowerThirdProps> & { 
       </div>
     </div>
   );
+}
+
+export function lowerThirdTexts(p: z.output<typeof LowerThirdProps>): TextItem[] {
+  return [{ id: "strap", text: p.subtitle ? `${p.title} ${p.subtitle}` : p.title, from: p.delay + TEXT_IN[1] }];
 }

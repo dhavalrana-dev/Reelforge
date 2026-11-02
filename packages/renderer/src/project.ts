@@ -27,7 +27,7 @@ import {
   type CaptionStyleName,
   type ValidationReport,
 } from "@reelforge/media";
-import { getTheme, splitBackground } from "@reelforge/motion";
+import { checkReadability, describeReadabilityIssue, getTheme, splitBackground } from "@reelforge/motion";
 import { FrameRenderer, type RenderStats } from "./frame-renderer";
 
 export interface LoadedProject {
@@ -44,7 +44,10 @@ export async function loadProject(projectFile: string): Promise<LoadedProject> {
   const dir = dirname(resolve(projectFile));
   return {
     project,
-    warnings: issues.filter((i) => i.level === "warning").map((i) => `${i.path}: ${i.message}`),
+    warnings: [
+      ...issues.filter((i) => i.level === "warning").map((i) => `${i.path}: ${i.message}`),
+      ...checkReadability(project).issues.map((i) => `readability: ${describeReadabilityIssue(i)}`),
+    ],
     path: (p) => (isAbsolute(p) ? p : join(dir, p)),
   };
 }

@@ -7,8 +7,10 @@ import {
   resolveTimeline,
   validateProject,
   type OutputFormat,
+  type Scene,
   type TimeRange,
 } from "@reelforge/core";
+import { checkReadability, describeReadabilityIssue, minSceneFrames } from "@reelforge/motion";
 import {
   CAPTION_STYLES,
   DEFAULT_AUDIO_CLEANUP,
@@ -44,10 +46,12 @@ export interface PlanResult {
   outputDuration: number;
   silences: TimeRange[];
   words: number;
+  /** Readability problems in the planned project, e.g. a video too short for its starter text. */
+  warnings: string[];
 }
 
-const TITLE_FRAMES = 75;
-const LOWER_THIRD_FRAMES = 90;
+/** Without a title, the name strap waits half a second. */
+const LOWER_THIRD_START = 15;
 
 /** Path as written into a project file: relative to it, with forward slashes. */
 const projectPath = (projectFile: string, target: string) => relative(dirname(resolve(projectFile)), resolve(target)).replace(/\\/g, "/");
@@ -98,25 +102,19 @@ export async function planRecording(input: string, projectFile: string, opts: Pl
     words = transcript.words.length;
   }
 
-  const scenes: object[] = [];
+  // Starter scenes last exactly as long as their text needs to be read (see checkReadability).
+  const scenes: Scene[] = [];
   const lastFrame = timeline.durationFrames;
-  if (opts.title) {
-    scenes.push({
-      id: "title",
-      startFrame: 0,
-      durationFrames: Math.min(TITLE_FRAMES, lastFrame),
-      components: [{ type: "kinetic-text", text: opts.title, position: "top", size: 7 }],
-    });
-  }
-  if (opts.lowerThird) {
-    const start = Math.min(opts.title ? TITLE_FRAMES : 15, Math.max(0, lastFrame - 1));
-    scenes.push({
-      id: "lower-third",
-      startFrame: start,
-      durationFrames: Math.min(LOWER_THIRD_FRAMES, lastFrame - start),
-      components: [{ type: "lower-third", ...opts.lowerThird }],
-    });
-  }
+  const addScene = (id: string, startFrame: number, component: Scene["components"][number]) => {
+    if (startFrame >= lastFrame) return startFrame;
+    const scene: Scene = { id, startFrame, durationFrames: 1, transition: "fade", components: [component] };
+    scene.durationFrames = Math.min(minSceneFrames(scene, fps), lastFrame - startFrame);
+    scenes.push(scene);
+    return startFrame + scene.durationFrames;
+  };
+  let next = 0;
+  if (opts.title) next = addScene("title", 0, { type: "kinetic-text", text: opts.title, position: "top", size: 7 });
+  if (opts.lowerThird) addScene("lower-third", opts.title ? next : LOWER_THIRD_START, { type: "lower-third", ...opts.lowerThird });
 
   const project = {
     schemaVersion: "1.0",
@@ -129,7 +127,7 @@ export async function planRecording(input: string, projectFile: string, opts: Pl
     scenes,
   };
 
-  const { issues } = validateProject(project);
+  const { project: parsed, issues } = validateProject(project);
   const errors = issues.filter((i) => i.level === "error");
   if (errors.length) throw new Error(`planner produced an invalid project: ${errors.map((e) => `${e.path}: ${e.message}`).join("; ")}`);
   await writeFile(projectFile, JSON.stringify(project, null, 2));
@@ -141,5 +139,6 @@ export async function planRecording(input: string, projectFile: string, opts: Pl
     outputDuration: timeline.durationFrames / fps,
     silences,
     words,
+    warnings: parsed ? checkReadability(parsed).issues.map((i) => `readability: ${describeReadabilityIssue(i)}`) : [],
   };
 }

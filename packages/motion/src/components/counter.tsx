@@ -1,6 +1,6 @@
 import { easing, mapRange } from "@reelforge/core";
 import { z } from "zod";
-import { slotY, type FrameContext } from "../context";
+import { slotY, type FrameContext, type TextItem } from "../context";
 
 export const CounterProps = z.object({
   to: z.number(),
@@ -54,4 +54,10 @@ export function Counter({ ctx, ...raw }: z.input<typeof CounterProps> & { ctx: F
       )}
     </div>
   );
+}
+
+/** The number settles at `duration`; the label has finished fading in by then too. */
+export function counterTexts(p: z.output<typeof CounterProps>): TextItem[] {
+  const text = `${p.prefix}${formatNumber(p.to, p.decimals)}${p.suffix}${p.label ? ` ${p.label}` : ""}`;
+  return [{ id: "value", text, from: p.delay + p.duration }];
 }

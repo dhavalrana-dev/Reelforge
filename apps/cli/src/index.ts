@@ -31,7 +31,7 @@ import {
   validateOutput,
   type CaptionStyleName,
 } from "@reelforge/media";
-import { COMPONENTS, THEMES, projectSchemaWithComponents, validateComposition } from "@reelforge/motion";
+import { COMPONENTS, THEMES, checkReadability, describeReadabilityIssue, projectSchemaWithComponents, validateComposition } from "@reelforge/motion";
 import { zodToJsonSchema } from "zod-to-json-schema";
 import { planRecording, renderProject, renderStill } from "@reelforge/renderer";
 import { checkPolicy, configuredProvider, generate, isPermissive, type GenerativeProvider, type GenerativeValue } from "@reelforge/generative";
@@ -271,6 +271,7 @@ program
       onProgress: (l) => console.log(l),
     });
     console.log(`${result.sourceDuration.toFixed(2)}s -> ${result.outputDuration.toFixed(2)}s${result.words ? `, ${result.words} words transcribed` : ""}`);
+    for (const w of result.warnings) console.log(`warning: ${w}`);
     console.log(`wrote ${result.projectFile}${result.transcriptFile ? ` and ${result.transcriptFile}` : ""}`);
     console.log(`next: review or edit it, preview with "reelforge still ${opts.output} --frame 30 -o check.png", then "reelforge render ${opts.output} -o out.mp4"`);
   });
@@ -376,7 +377,9 @@ program
       componentErrors = [(e as Error).message];
     }
     for (const e of componentErrors) console.log(`ERROR ${e}`);
-    if (!issues.length && !componentErrors.length) console.log("project is valid");
+    const readability = project && !componentErrors.length ? checkReadability(project).issues : [];
+    for (const r of readability) console.log(`WARNING readability: ${describeReadabilityIssue(r)}`);
+    if (!issues.length && !componentErrors.length && !readability.length) console.log("project is valid");
     if (issues.some((i) => i.level === "error") || componentErrors.length) process.exitCode = 1;
   });
 

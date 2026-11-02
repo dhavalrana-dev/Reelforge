@@ -2,15 +2,15 @@ import { ProjectSchema, SceneSchema, mapRange, type Project, type Scene } from "
 import type { ComponentType } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { z, type AnyZodObject } from "zod";
-import { BarChart, BarChartProps } from "./components/bar-chart";
-import { BrowserWindow, BrowserWindowProps } from "./components/browser-window";
-import { BulletList, BulletListProps } from "./components/bullet-list";
-import { Counter, CounterProps } from "./components/counter";
-import { KineticText, KineticTextProps } from "./components/kinetic-text";
-import { LowerThird, LowerThirdProps } from "./components/lower-third";
-import { NetworkDiagram, NetworkDiagramProps } from "./components/network-diagram";
+import { BarChart, BarChartProps, barChartTexts } from "./components/bar-chart";
+import { BrowserWindow, BrowserWindowProps, browserWindowTexts } from "./components/browser-window";
+import { BulletList, BulletListProps, bulletListTexts } from "./components/bullet-list";
+import { Counter, CounterProps, counterTexts } from "./components/counter";
+import { KineticText, KineticTextProps, kineticTextTexts } from "./components/kinetic-text";
+import { LowerThird, LowerThirdProps, lowerThirdTexts } from "./components/lower-third";
+import { NetworkDiagram, NetworkDiagramProps, networkDiagramTexts } from "./components/network-diagram";
 import { Backdrop, BackdropProps, Rect, RectProps } from "./components/shapes";
-import type { FrameContext } from "./context";
+import type { FrameContext, TextItem } from "./context";
 import { getTheme, type Theme } from "./theme";
 
 interface RegisteredComponent {
@@ -23,6 +23,8 @@ interface RegisteredComponent {
    * render in a separate low-resolution pass beneath everything else.
    */
   layer?: "background";
+  /** The texts the component shows and when each is fully visible, for the readability check. */
+  texts?: (props: any) => TextItem[];
   // Props are validated against `props` before rendering.
   render: ComponentType<any>;
 }
@@ -30,23 +32,26 @@ interface RegisteredComponent {
 export const COMPONENTS: Record<string, RegisteredComponent> = {
   "kinetic-text": {
     props: KineticTextProps,
+    texts: kineticTextTexts,
     render: KineticText,
     description: "Headline text: word-by-word reveal, fade-up or typewriter; highlight words in the accent colour.",
   },
-  "lower-third": { props: LowerThirdProps, render: LowerThird, description: "Name strap with title and optional subtitle." },
+  "lower-third": { props: LowerThirdProps, render: LowerThird, texts: lowerThirdTexts, description: "Name strap with title and optional subtitle." },
   "network-diagram": {
     props: NetworkDiagramProps,
+    texts: networkDiagramTexts,
     render: NetworkDiagram,
     description: "2-6 labelled nodes that appear in sequence, linked by lines that draw themselves, with data packets flowing.",
   },
   "browser-window": {
     props: BrowserWindowProps,
+    texts: browserWindowTexts,
     render: BrowserWindow,
     description: "Browser mock-up: URL types itself, loading bar runs, page skeleton and headline appear.",
   },
-  "bar-chart": { props: BarChartProps, render: BarChart, description: "Up to 7 horizontal bars growing in sequence with counting values." },
-  "bullet-list": { props: BulletListProps, render: BulletList, description: "Optional heading and up to 6 items sliding in with check, dot or number markers." },
-  counter: { props: CounterProps, render: Counter, description: "Large number counting up, with prefix, suffix and label." },
+  "bar-chart": { props: BarChartProps, render: BarChart, texts: barChartTexts, description: "Up to 7 horizontal bars growing in sequence with counting values." },
+  "bullet-list": { props: BulletListProps, render: BulletList, texts: bulletListTexts, description: "Optional heading and up to 6 items sliding in with check, dot or number markers." },
+  counter: { props: CounterProps, render: Counter, texts: counterTexts, description: "Large number counting up, with prefix, suffix and label." },
   rect: { props: RectProps, render: Rect, description: "Plain rectangle positioned in percent of the frame." },
   backdrop: {
     props: BackdropProps,
@@ -131,9 +136,13 @@ export function activeScenes(project: Project, frame: number): Scene[] {
   return project.scenes.filter((s) => frame >= s.startFrame && frame < s.startFrame + s.durationFrames);
 }
 
+/** Frames a scene spends fading in, and again fading out (0 for a cut). */
+export function sceneFadeFrames(scene: Scene): number {
+  return scene.transition === "cut" ? 0 : Math.min(FADE_FRAMES, Math.floor(scene.durationFrames / 2));
+}
+
 function sceneOpacity(scene: Scene, local: number): number {
-  if (scene.transition === "cut") return 1;
-  const fade = Math.min(FADE_FRAMES, Math.floor(scene.durationFrames / 2));
+  const fade = sceneFadeFrames(scene);
   if (fade === 0) return 1;
   return Math.min(
     mapRange(local, [0, fade], [0, 1]),

@@ -11,6 +11,7 @@ import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { resolveTimeline, sourceToOutputFrame, TranscriptSchema, type Project } from "@reelforge/core";
 import { defaultTools, runOrThrow } from "@reelforge/media";
+import { minSceneFrames } from "@reelforge/motion";
 import { planRecording, renderProject, renderStill } from "@reelforge/renderer";
 
 const outDir = resolve("out/demo");
@@ -75,11 +76,15 @@ const startFrame = cue ? sourceToOutputFrame(timeline, cue.start) : null;
 if (startFrame !== null && startFrame !== undefined) {
   const durationFrames = Math.min(170, timeline.durationFrames - startFrame);
   // The name strap and the diagram share the middle of the frame: end the strap
-  // before the diagram starts, or drop it if less than a second would remain.
+  // before the diagram starts, or drop it if it would then be too short to read.
   const strap = project.scenes.find((s) => s.id === "lower-third");
   if (strap && strap.startFrame + strap.durationFrames > startFrame) {
+    const needed = minSceneFrames(strap, project.project.fps);
     strap.durationFrames = startFrame - strap.startFrame;
-    if (strap.durationFrames < project.project.fps) project.scenes = project.scenes.filter((s) => s !== strap);
+    if (strap.durationFrames < needed) {
+      project.scenes = project.scenes.filter((s) => s !== strap);
+      console.log(`name strap dropped: only ${strap.durationFrames} frames before the diagram, ${needed} needed to read it`);
+    }
   }
   project.scenes.push({
     id: "diagram",

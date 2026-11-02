@@ -1,6 +1,6 @@
 import { easing, mapRange, spring } from "@reelforge/core";
 import { z } from "zod";
-import { CAPTION_ZONE_TOP, clamp01, type FrameContext } from "../context";
+import { CAPTION_ZONE_TOP, clamp01, type FrameContext, type TextItem } from "../context";
 
 export const NetworkDiagramProps = z.object({
   nodes: z.array(z.string().min(1)).min(2).max(6),
@@ -11,6 +11,9 @@ export const NetworkDiagramProps = z.object({
   step: z.number().int().positive().default(18),
   delay: z.number().int().min(0).default(0),
 });
+
+/** Frames each node takes to fade in. */
+const NODE_FADE_FRAMES = 4;
 
 /**
  * Nodes pop in one after another, each link draws itself, and once the chain
@@ -78,7 +81,7 @@ export function NetworkDiagram({ ctx, ...raw }: z.input<typeof NetworkDiagramPro
         const s = spring(local, fps, { damping: 12, stiffness: 200 });
         const active = flowFrame >= 0 || local >= 0;
         return (
-          <g key={i} transform={`translate(${c.x} ${c.y}) scale(${s})`} opacity={clamp01(local / 4)}>
+          <g key={i} transform={`translate(${c.x} ${c.y}) scale(${s})`} opacity={clamp01(local / NODE_FADE_FRAMES)}>
             <rect
               x={-boxW / 2}
               y={-boxH / 2}
@@ -106,4 +109,8 @@ export function NetworkDiagram({ ctx, ...raw }: z.input<typeof NetworkDiagramPro
       })}
     </svg>
   );
+}
+
+export function networkDiagramTexts(p: z.output<typeof NetworkDiagramProps>): TextItem[] {
+  return [{ id: "nodes", text: p.nodes.join(" "), from: p.delay + (p.nodes.length - 1) * p.step + NODE_FADE_FRAMES }];
 }
